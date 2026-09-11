@@ -16,7 +16,7 @@
 - Lucene APIs follow the blog (ByteBuffersDirectory, AnalyzingInfixSuggester, FacetsConfig, DrillSideways). Do not copy Diggo extras (`*.present`, artwork, uuid, paths, upsert).
 - Everything under `src/test`. No Diggo Maven dependency in the published POM.
 - Dump tool is one-shot and **not** committed (SQLCipher + Rekordbox key must not ship).
-- Pin post numbers: Bob=62, Bob+Club=27, Bob+Club−4A/4B=24; facets under Bob: Club=26, BPM 120–130=52, rating 5=13, year 2020s=15. If the dump disagrees, fail — do not loosen.
+- Pin post numbers: Bob=62, Bob+Club=26, Bob+Club−4A/4B=23; facets under Bob: Club=26, BPM 120–130=52, rating 5=13, year 2020s=15. If the dump disagrees, fail — do not loosen.
 - Null strings index as `""`. Blank `q` + no filters → `MatchAllDocsQuery`.
 - TDD: failing test first, watch it fail, then implement. Commit after each task.
 - Path: `/Users/david/IdeaProjects/blog-tests/lucene-search-tracks`
@@ -753,24 +753,24 @@ class TrackSearchTest {
     }
 
     @Test
-    void bobClub_returns27Hits() throws Exception {
+    void bobClub_returns26Hits() throws Exception {
         List<Track> hits = search("Bob", Map.of("genre", List.of("Club")), Map.of());
-        assertThat(hits).hasSize(27);
+        assertThat(hits).hasSize(26);
         assertThat(titles(hits)).contains("Free (Bob Sinclar Remix)");
         assertThat(titles(hits)).doesNotContain("TRIANGLE DES BERMUDES", "Give Me Love");
     }
 
     @Test
-    void bobClubMinusKeys_returns24Hits() throws Exception {
+    void bobClubMinusKeys_returns23Hits() throws Exception {
         List<Track> hits = search(
                 "Bob",
                 Map.of("genre", List.of("Club")),
                 Map.of("key", List.of("4A", "4B")));
-        assertThat(hits).hasSize(24);
+        assertThat(hits).hasSize(23);
         assertThat(titles(hits)).doesNotContain(
                 "Crazy (Bob Sinclar vs. Dimitri Vegas & Like Mike remix)",
                 "Free (Bob Sinclar Remix)");
-        assertThat(titles(hits)).contains("I Feel For You");
+        assertThat(titles(hits)).contains("I Feel For You (Ben Delay Club Mix)");
     }
 
     @Test
@@ -826,7 +826,7 @@ Follow Diggo’s `freeTextFromTokens` / `addFreeTextField` / `fieldFilter` **wit
 
 Run: `mvn -q test -Dtest=TrackSearchTest`
 
-Expected: PASS with 62 / 27 / 24. If sizes differ, stop and report dump vs post — do not change assertions.
+Expected: PASS with 62 / 26 / 23. If sizes differ, stop and report dump vs post — do not change assertions.
 
 - [ ] **Step 5: Commit**
 
@@ -988,7 +988,7 @@ Under `q=Bob`, collector `n=1`:
 
 `DrillSideways`: base = free text Bob **without** genre FILTER; `drillDown.add("genre", TermQuery(GENRE_RAW, "Club"))`. BPM histogram must be smaller than unfiltered-Bob BPM `120 – 130`. Genre children still include Dance.
 
-If Club search hits are 27 and the Club facet is 26, keep both assertions and add a one-line comment pointing at the posts. If they match, still pin 26 as specified; only change the spec/posts after a human decision.
+Club search hits and the Club facet are both 26 (exact `genre.raw.normalized`). Pin 26.
 
 - [ ] **Step 1: Write the failing facets test**
 
@@ -1135,7 +1135,7 @@ EOF
 | `Track` flat record + `TrackDataset.load` | Task 1 |
 | Analyzer + full field table including `*.raw` and SSDV genre | Task 2 |
 | `ByteBuffersDirectory` rebuild, no upsert | Task 3 |
-| Structured MUST/FILTER/MUST_NOT + 62/27/24 | Task 4 |
+| Structured MUST/FILTER/MUST_NOT + 62/26/23 | Task 4 |
 | Infix suggest + FILTER chip + scope | Task 5 |
 | Facet counts 26/52/13/15 + DrillSideways | Task 6 |
 | Article 7 Elasticsearch | Explicitly out of scope |

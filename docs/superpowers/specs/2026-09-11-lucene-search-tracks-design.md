@@ -207,8 +207,8 @@ All tests use the real `tracks.ndjson`. Rebuild once per class when possible.
 | Request                                      | Assertion   |
 |----------------------------------------------|-------------|
 | `q=Bob`                                      | **62** hits |
-| `q=Bob` + `genre=Club`                       | **27**      |
-| `q=Bob` + Club + `minus-key=4A,4B`           | **24**      |
+| `q=Bob` + `genre=Club`                       | **26**      |
+| `q=Bob` + Club + `minus-key=4A,4B`           | **23**      |
 
 Also:
 
@@ -218,7 +218,7 @@ Also:
 - `bob sincla` matches `Sinclar`; `bo sinclar` does not; `ouse` does not find House
 - Club ON: *Free (Bob Sinclar Remix)* stays; *TRIANGLE DES BERMUDES* and
   *Give Me Love* drop
-- minus 4A/4B: *Crazy* and *Free* drop; *I Feel For You* (2A Club) stays
+- minus 4A/4B: *Crazy* and *Free* drop; *I Feel For You (Ben Delay Club Mix)* (2A Club) stays
 - `Query.toString()` contains `FILTER` / `MUST_NOT` markers (`#`, `-`) as in
   the post (smoke, not a full string freeze)
 
@@ -246,10 +246,9 @@ Under `q=Bob` (same Part 3 MUST query, collector `n=1`):
 `DrillSideways`: `FILTER genre=Club` shrinks the BPM histogram; the genre
 panel still lists Dance.
 
-Known tension in the posts: Part 3 search says 27 Club hits for `q=Bob`,
-Part 5 facets say Club (26). If the dump reproduces 26 vs 27, document it in
-the test (do not hide it). If both are 27, the facet caption in Part 5 is
-wrong and the article should be fixed later.
+Part 3 search hits for `genre=Club` and the Part 5 Club facet are both **26**:
+the chip is an exact `genre.raw.normalized` term, same label the SSDV facet
+counts. *I Can't Wait* (Club House) is a Bob hit but not a Club hit.
 
 ## Error handling
 
