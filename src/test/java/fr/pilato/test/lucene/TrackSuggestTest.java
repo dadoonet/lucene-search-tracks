@@ -30,6 +30,7 @@ class TrackSuggestTest {
     @Test
     void club_returnsGenreAndTitle() throws Exception {
         List<TrackSuggestion> hits = index.suggest("club");
+        TrackTestLog.suggest("club", null, hits);
         assertThat(hits)
                 .extracting(TrackSuggestion::text, TrackSuggestion::field)
                 .contains(tuple("Club House", "genre"))
@@ -44,7 +45,9 @@ class TrackSuggestTest {
 
     @Test
     void madonna_returnsArtist() throws Exception {
-        assertThat(index.suggest("Madonna"))
+        List<TrackSuggestion> hits = index.suggest("Madonna");
+        TrackTestLog.suggest("Madonna", null, hits);
+        assertThat(hits)
                 .extracting(TrackSuggestion::text, TrackSuggestion::field)
                 .contains(tuple("Madonna", "artist"));
     }
@@ -53,22 +56,28 @@ class TrackSuggestTest {
     void applyingGenreChip_isFilterNotFreeText() throws Exception {
         var searcher = index.searcher();
         try (var reader = searcher.getIndexReader()) {
-            List<Track> withQ = TrackLuceneQueryBuilder.search(
+            List<TrackHit> withQHits = TrackLuceneQueryBuilder.searchHits(
                     searcher,
                     TrackLuceneQueryBuilder.buildStructured(
                             "club", Map.of("genre", List.of("Club House")), Map.of()),
                     corpus);
-            List<Track> chipOnly = TrackLuceneQueryBuilder.search(
+            TrackTestLog.search(
+                    "club", Map.of("genre", List.of("Club House")), Map.of(), withQHits);
+            List<TrackHit> chipOnlyHits = TrackLuceneQueryBuilder.searchHits(
                     searcher,
                     TrackLuceneQueryBuilder.buildStructured(
                             "", Map.of("genre", List.of("Club House")), Map.of()),
                     corpus);
-            assertThat(chipOnly.size()).isGreaterThanOrEqualTo(withQ.size());
+            TrackTestLog.search(
+                    "", Map.of("genre", List.of("Club House")), Map.of(), chipOnlyHits);
+            assertThat(chipOnlyHits.size()).isGreaterThanOrEqualTo(withQHits.size());
         }
     }
 
     @Test
     void emptyScope_returnsNothing() throws Exception {
-        assertThat(index.suggest("club", List.of())).isEmpty();
+        List<TrackSuggestion> hits = index.suggest("club", List.of());
+        TrackTestLog.suggest("club", List.of(), hits);
+        assertThat(hits).isEmpty();
     }
 }

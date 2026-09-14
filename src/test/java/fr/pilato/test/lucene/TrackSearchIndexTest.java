@@ -15,6 +15,7 @@ class TrackSearchIndexTest {
         List<Track> tracks = TrackDataset.load();
         try (TrackSearchIndex index = new TrackSearchIndex()) {
             index.rebuild(tracks);
+            TrackTestLog.indexRebuilt(tracks.size(), index.numDocs());
             assertThat(index.numDocs()).isEqualTo(tracks.size());
             IndexSearcher searcher = index.searcher();
             try (IndexReader reader = searcher.getIndexReader()) {

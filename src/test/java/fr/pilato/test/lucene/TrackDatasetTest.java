@@ -11,6 +11,11 @@ class TrackDatasetTest {
     @Test
     void load_readsRekordboxSnapshot() {
         List<Track> tracks = TrackDataset.load();
+        Track reference = tracks.stream()
+                .filter(t -> "255465792".equals(t.id()))
+                .findFirst()
+                .orElseThrow();
+        TrackTestLog.dataset(tracks, reference);
         assertThat(tracks).hasSizeGreaterThan(4000);
         assertThat(tracks)
                 .anySatisfy(t -> {

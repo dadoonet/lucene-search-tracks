@@ -10,7 +10,8 @@ mvn test
 ```
 
 Requires **Java 25**. The NDJSON under `src/test/resources/tracks.ndjson` is a
-snapshot of a local Rekordbox library; tests never open SQLCipher.
+snapshot of a local Rekordbox library; tests never open SQLCipher. Each test
+prints an emoji narrative of the query and the top Lucene hits (with scores).
 
 | Post           | Test class                |
 |----------------|---------------------------|

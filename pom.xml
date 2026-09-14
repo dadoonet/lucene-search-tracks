@@ -75,6 +75,12 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.6.0</version>
+                <configuration>
+                    <reportFormat>plain</reportFormat>
+                    <useFile>false</useFile>
+                    <forkCount>0</forkCount>
+                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
+                </configuration>
             </plugin>
         </plugins>
     </build>

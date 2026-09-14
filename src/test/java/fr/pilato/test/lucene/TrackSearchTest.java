@@ -70,6 +70,7 @@ class TrackSearchTest {
                 "Bob",
                 Map.of("genre", List.of("Club")),
                 Map.of("key", List.of("4A", "4B")));
+        TrackTestLog.luceneQuery(q);
         String printed = q.toString();
         assertThat(printed).contains("#").contains("-");
     }
@@ -80,7 +81,9 @@ class TrackSearchTest {
         Query lucene = TrackLuceneQueryBuilder.buildStructured(q, filters, mustNots);
         IndexSearcher searcher = index.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
-            return TrackLuceneQueryBuilder.search(searcher, lucene, corpus);
+            List<TrackHit> hits = TrackLuceneQueryBuilder.searchHits(searcher, lucene, corpus);
+            TrackTestLog.search(q, filters, mustNots, hits);
+            return hits.stream().map(TrackHit::track).toList();
         }
     }
 

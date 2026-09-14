@@ -30,6 +30,10 @@ class TrackDocumentMapperTest {
                 "comment");
 
         Document doc = TrackDocumentMapper.toDocument(track);
+        TrackTestLog.mapping(
+                track,
+                tokens(TrackIndexFields.TITLE, doc.get(TrackIndexFields.TITLE)),
+                tokens(TrackIndexFields.ARTIST, "Ultra Naté"));
 
         assertThat(doc.get(TrackIndexFields.ID)).isEqualTo("255465792");
         assertThat(tokens(TrackIndexFields.TITLE, doc.get(TrackIndexFields.TITLE)))

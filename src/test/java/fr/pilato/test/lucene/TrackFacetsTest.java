@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,6 +69,12 @@ class TrackFacetsTest {
                 }
             }
             assertThat(twenties).isEqualTo(15);
+            TrackTestLog.facets("Bob", List.of(
+                    new TrackTestLog.FacetLine("🏷️", "Club", 26),
+                    new TrackTestLog.FacetLine("⏱", "120 – 130", 52),
+                    new TrackTestLog.FacetLine("⭐", "5", 13),
+                    new TrackTestLog.FacetLine("📅", "2020–2029", twenties)));
+            TrackTestLog.facetChildren("genre", genres.getAllChildren("genre").labelValues, 8);
         }
     }
 
@@ -85,6 +92,12 @@ class TrackFacetsTest {
             assertThat(count(facets.getAllChildren("genre"), "Dance")).isGreaterThan(0);
             assertThat(count(facets.getAllChildren(TrackIndexFields.BPM), "120 – 130"))
                     .isLessThan(52);
+            TrackTestLog.drillSideways(
+                    "Bob",
+                    "genre",
+                    "Club",
+                    count(facets.getAllChildren("genre"), "Dance"),
+                    count(facets.getAllChildren(TrackIndexFields.BPM), "120 – 130"));
         }
     }
 

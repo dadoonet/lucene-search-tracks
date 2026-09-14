@@ -56,13 +56,18 @@ public final class TrackLuceneQueryBuilder {
 
     public static List<Track> search(IndexSearcher searcher, Query query, List<Track> corpus)
             throws IOException {
+        return searchHits(searcher, query, corpus).stream().map(TrackHit::track).toList();
+    }
+
+    public static List<TrackHit> searchHits(IndexSearcher searcher, Query query, List<Track> corpus)
+            throws IOException {
         Map<String, Track> byId = new HashMap<>();
         for (Track track : corpus) {
             byId.put(track.id(), track);
         }
         int limit = Math.max(1, searcher.getIndexReader().numDocs());
         TopDocs hits = searcher.search(query, limit);
-        List<Track> ordered = new ArrayList<>();
+        List<TrackHit> ordered = new ArrayList<>();
         for (ScoreDoc hit : hits.scoreDocs) {
             IndexableField idField = searcher.storedFields()
                     .document(hit.doc)
@@ -72,7 +77,7 @@ public final class TrackLuceneQueryBuilder {
             }
             Track track = byId.get(idField.stringValue());
             if (track != null) {
-                ordered.add(track);
+                ordered.add(new TrackHit(track, hit.score));
             }
         }
         return List.copyOf(ordered);
