@@ -35,7 +35,7 @@ class TrackFacetsTest {
     @BeforeAll
     static void rebuild() throws Exception {
         index = new TrackSearchIndex();
-        index.rebuild(TrackDataset.load());
+        index.rebuild(TrackDatasetLoader.load());
     }
 
     @AfterAll
@@ -54,15 +54,15 @@ class TrackFacetsTest {
                     .facetsCollector();
             Facets genres = new SortedSetDocValuesFacetCounts(state, fc);
             Facets bpm = new DoubleRangeFacetCounts(
-                    TrackIndexFields.BPM, fc, TrackFacets.bpmRanges());
-            Facets rating = new LongValueFacetCounts(TrackIndexFields.RATING, fc);
-            Facets year = new LongValueFacetCounts(TrackIndexFields.YEAR, fc);
+                    TrackDocumentMapper.BPM, fc, TrackFacets.bpmRanges());
+            Facets rating = new LongValueFacetCounts(TrackDocumentMapper.RATING, fc);
+            Facets year = new LongValueFacetCounts(TrackDocumentMapper.YEAR, fc);
 
             assertThat(count(genres.getAllChildren("genre"), "Club")).isEqualTo(26);
-            assertThat(count(bpm.getAllChildren(TrackIndexFields.BPM), "120 – 130")).isEqualTo(52);
-            assertThat(count(rating.getAllChildren(TrackIndexFields.RATING), "5")).isEqualTo(13);
+            assertThat(count(bpm.getAllChildren(TrackDocumentMapper.BPM), "120 – 130")).isEqualTo(52);
+            assertThat(count(rating.getAllChildren(TrackDocumentMapper.RATING), "5")).isEqualTo(13);
             long twenties = 0;
-            for (LabelAndValue lv : year.getAllChildren(TrackIndexFields.YEAR).labelValues) {
+            for (LabelAndValue lv : year.getAllChildren(TrackDocumentMapper.YEAR).labelValues) {
                 int y = Integer.parseInt(lv.label);
                 if (y >= 2020 && y <= 2029) {
                     twenties += lv.value.longValue();
@@ -85,19 +85,19 @@ class TrackFacetsTest {
         try (IndexReader reader = searcher.getIndexReader()) {
             var state = new DefaultSortedSetDocValuesReaderState(reader, TrackFacets.config());
             DrillDownQuery drillDown = new DrillDownQuery(TrackFacets.config(), base);
-            drillDown.add("genre", new TermQuery(new Term(TrackIndexFields.GENRE_RAW, "Club")));
+            drillDown.add("genre", new TermQuery(new Term(TrackDocumentMapper.GENRE_RAW, "Club")));
             Facets facets = new TrackDrillSideways(searcher, state)
                     .search(drillDown, 1)
                     .facets;
             assertThat(count(facets.getAllChildren("genre"), "Dance")).isGreaterThan(0);
-            assertThat(count(facets.getAllChildren(TrackIndexFields.BPM), "120 – 130"))
+            assertThat(count(facets.getAllChildren(TrackDocumentMapper.BPM), "120 – 130"))
                     .isLessThan(52);
             TrackTestLog.drillSideways(
                     "Bob",
                     "genre",
                     "Club",
                     count(facets.getAllChildren("genre"), "Dance"),
-                    count(facets.getAllChildren(TrackIndexFields.BPM), "120 – 130"));
+                    count(facets.getAllChildren(TrackDocumentMapper.BPM), "120 – 130"));
         }
     }
 
@@ -139,8 +139,8 @@ class TrackFacetsTest {
             Map<String, Facets> byDim = new LinkedHashMap<>();
             Facets ssdv = new SortedSetDocValuesFacetCounts(state, collector);
             byDim.put(TrackFacets.GENRE, ssdv);
-            byDim.put(TrackIndexFields.BPM, new DoubleRangeFacetCounts(
-                    TrackIndexFields.BPM, collector, TrackFacets.bpmRanges()));
+            byDim.put(TrackDocumentMapper.BPM, new DoubleRangeFacetCounts(
+                    TrackDocumentMapper.BPM, collector, TrackFacets.bpmRanges()));
             return new MultiFacets(byDim);
         }
     }

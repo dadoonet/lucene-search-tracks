@@ -47,7 +47,7 @@ public final class TrackAnalyzers {
         }
         List<String> tokens = new ArrayList<>();
         try (Analyzer analyzer = searchAnalyzer();
-             TokenStream stream = analyzer.tokenStream(TrackIndexFields.TITLE, text)) {
+             TokenStream stream = analyzer.tokenStream(TrackDocumentMapper.TITLE, text)) {
             CharTermAttribute term = stream.addAttribute(CharTermAttribute.class);
             stream.reset();
             while (stream.incrementToken()) {

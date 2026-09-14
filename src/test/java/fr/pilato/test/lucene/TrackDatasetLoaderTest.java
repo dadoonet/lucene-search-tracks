@@ -6,18 +6,18 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TrackDatasetTest {
+class TrackDatasetLoaderTest {
 
     @Test
     void load_readsRekordboxSnapshot() {
-        List<Track> tracks = TrackDataset.load();
+        List<Track> tracks = TrackDatasetLoader.load();
         Track reference = tracks.stream()
                 .filter(t -> "255465792".equals(t.id()))
                 .findFirst()
                 .orElseThrow();
         TrackTestLog.dataset(tracks, reference);
-        assertThat(tracks).hasSizeGreaterThan(4000);
         assertThat(tracks)
+                .hasSizeGreaterThan(4000)
                 .anySatisfy(t -> {
                     assertThat(t.id()).isEqualTo("255465792");
                     assertThat(t.title()).isEqualTo("Free (Bob Sinclar Remix)");

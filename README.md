@@ -1,15 +1,15 @@
 # lucene-search-tracks
 
 In-process [Apache Lucene](https://lucene.apache.org/) demo used by the
-**Lucene Bean Search** series (Parts 1–5). Tests only: a Rekordbox track
-snapshot is indexed in RAM (`ByteBuffersDirectory`), then searched,
-autocompleted, and faceted.
+**Lucene Bean Search** series (Parts 1–5). Production helpers live under
+`src/main`; tests under `src/test` rebuild a Rekordbox track snapshot in RAM
+(`ByteBuffersDirectory`), then search, autocomplete, and facet it.
 
 ```bash
 mvn test
 ```
 
-Requires **Java 25**. The NDJSON under `src/test/resources/tracks.ndjson` is a
+Requires **Java 25**. The NDJSON under `src/main/resources/tracks.ndjson` is a
 snapshot of a local Rekordbox library; tests never open SQLCipher. Each test
 prints an emoji narrative of the query and the top Lucene hits (with scores).
 

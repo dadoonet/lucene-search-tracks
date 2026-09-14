@@ -71,7 +71,7 @@ public final class TrackLuceneQueryBuilder {
         for (ScoreDoc hit : hits.scoreDocs) {
             IndexableField idField = searcher.storedFields()
                     .document(hit.doc)
-                    .getField(TrackIndexFields.ID);
+                    .getField(TrackDocumentMapper.ID);
             if (idField == null) {
                 continue;
             }
@@ -131,12 +131,12 @@ public final class TrackLuceneQueryBuilder {
 
     private static Query freeTextQuery(String token, boolean prefix) {
         BooleanQuery.Builder fields = new BooleanQuery.Builder();
-        addFreeTextField(fields, TrackIndexFields.TITLE, TITLE_BOOST, token, prefix);
-        addFreeTextField(fields, TrackIndexFields.ARTIST, ARTIST_BOOST, token, prefix);
-        addFreeTextField(fields, TrackIndexFields.GENRE, GENRE_BOOST, token, prefix);
-        addFreeTextField(fields, TrackIndexFields.ALBUM, ALBUM_BOOST, token, prefix);
-        addFreeTextField(fields, TrackIndexFields.LABEL, LABEL_BOOST, token, prefix);
-        addFreeTextField(fields, TrackIndexFields.COMMENT, COMMENT_BOOST, token, prefix);
+        addFreeTextField(fields, TrackDocumentMapper.TITLE, TITLE_BOOST, token, prefix);
+        addFreeTextField(fields, TrackDocumentMapper.ARTIST, ARTIST_BOOST, token, prefix);
+        addFreeTextField(fields, TrackDocumentMapper.GENRE, GENRE_BOOST, token, prefix);
+        addFreeTextField(fields, TrackDocumentMapper.ALBUM, ALBUM_BOOST, token, prefix);
+        addFreeTextField(fields, TrackDocumentMapper.LABEL, LABEL_BOOST, token, prefix);
+        addFreeTextField(fields, TrackDocumentMapper.COMMENT, COMMENT_BOOST, token, prefix);
         fields.setMinimumNumberShouldMatch(1);
         return fields.build();
     }
@@ -180,10 +180,10 @@ public final class TrackLuceneQueryBuilder {
 
     private static Query fieldQuery(String field, String value) {
         String luceneField = switch (field) {
-            case "title" -> TrackIndexFields.TITLE_RAW_NORMALIZED;
-            case "artist" -> TrackIndexFields.ARTIST_RAW_NORMALIZED;
-            case "genre" -> TrackIndexFields.GENRE_RAW_NORMALIZED;
-            case "key" -> TrackIndexFields.KEY_CODE;
+            case "title" -> TrackDocumentMapper.TITLE_RAW_NORMALIZED;
+            case "artist" -> TrackDocumentMapper.ARTIST_RAW_NORMALIZED;
+            case "genre" -> TrackDocumentMapper.GENRE_RAW_NORMALIZED;
+            case "key" -> TrackDocumentMapper.KEY_CODE;
             default -> null;
         };
         if (luceneField == null) {

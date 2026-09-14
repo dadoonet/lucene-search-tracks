@@ -12,7 +12,7 @@ class TrackSearchIndexTest {
 
     @Test
     void rebuild_indexesEveryTrackInRam() throws Exception {
-        List<Track> tracks = TrackDataset.load();
+        List<Track> tracks = TrackDatasetLoader.load();
         try (TrackSearchIndex index = new TrackSearchIndex()) {
             index.rebuild(tracks);
             TrackTestLog.indexRebuilt(tracks.size(), index.numDocs());

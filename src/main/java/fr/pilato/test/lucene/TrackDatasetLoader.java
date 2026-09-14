@@ -11,14 +11,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class TrackDataset {
+public final class TrackDatasetLoader {
 
     private static final String RESOURCE = "/tracks.ndjson";
 
-    private TrackDataset() {}
+    private TrackDatasetLoader() {}
 
     public static List<Track> load() {
-        InputStream in = TrackDataset.class.getResourceAsStream(RESOURCE);
+        InputStream in = TrackDatasetLoader.class.getResourceAsStream(RESOURCE);
         if (in == null) {
             throw new IllegalStateException("Missing classpath resource " + RESOURCE);
         }

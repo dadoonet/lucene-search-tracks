@@ -19,7 +19,7 @@ class TrackSearchTest {
 
     @BeforeAll
     static void rebuild() throws Exception {
-        corpus = TrackDataset.load();
+        corpus = TrackDatasetLoader.load();
         index = new TrackSearchIndex();
         index.rebuild(corpus);
     }

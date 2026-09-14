@@ -32,20 +32,20 @@ class TrackDocumentMapperTest {
         Document doc = TrackDocumentMapper.toDocument(track);
         TrackTestLog.mapping(
                 track,
-                tokens(TrackIndexFields.TITLE, doc.get(TrackIndexFields.TITLE)),
-                tokens(TrackIndexFields.ARTIST, "Ultra Naté"));
+                tokens(TrackDocumentMapper.TITLE, doc.get(TrackDocumentMapper.TITLE)),
+                tokens(TrackDocumentMapper.ARTIST, "Ultra Naté"));
 
-        assertThat(doc.get(TrackIndexFields.ID)).isEqualTo("255465792");
-        assertThat(tokens(TrackIndexFields.TITLE, doc.get(TrackIndexFields.TITLE)))
+        assertThat(doc.get(TrackDocumentMapper.ID)).isEqualTo("255465792");
+        assertThat(tokens(TrackDocumentMapper.TITLE, doc.get(TrackDocumentMapper.TITLE)))
                 .contains("free", "bob", "sinclar", "remix");
-        assertThat(tokens(TrackIndexFields.ARTIST, "Ultra Naté")).contains("ultra", "nate");
-        assertThat(doc.get(TrackIndexFields.GENRE_RAW)).isEqualTo("Club");
-        assertThat(doc.get(TrackIndexFields.GENRE_RAW_NORMALIZED)).isEqualTo("club");
-        assertThat(doc.get(TrackIndexFields.KEY_CODE)).isEqualTo("4b");
-        assertThat(doc.getField(TrackIndexFields.BPM).storedValue().getDoubleValue()).isEqualTo(128.0);
-        assertThat(doc.getField(TrackIndexFields.RATING).storedValue().getIntValue()).isEqualTo(3);
-        assertThat(names(doc, TrackIndexFields.TITLE_RAW)).isNotEmpty();
-        assertThat(names(doc, TrackIndexFields.ARTIST_RAW)).isNotEmpty();
+        assertThat(tokens(TrackDocumentMapper.ARTIST, "Ultra Naté")).contains("ultra", "nate");
+        assertThat(doc.get(TrackDocumentMapper.GENRE_RAW)).isEqualTo("Club");
+        assertThat(doc.get(TrackDocumentMapper.GENRE_RAW_NORMALIZED)).isEqualTo("club");
+        assertThat(doc.get(TrackDocumentMapper.KEY_CODE)).isEqualTo("4b");
+        assertThat(doc.getField(TrackDocumentMapper.BPM).storedValue().getDoubleValue()).isEqualTo(128.0);
+        assertThat(doc.getField(TrackDocumentMapper.RATING).storedValue().getIntValue()).isEqualTo(3);
+        assertThat(names(doc, TrackDocumentMapper.TITLE_RAW)).isNotEmpty();
+        assertThat(names(doc, TrackDocumentMapper.ARTIST_RAW)).isNotEmpty();
     }
 
     private static List<String> names(Document doc, String field) {
