@@ -37,22 +37,22 @@ public final class TrackDocumentMapper {
         Document doc = new Document();
         doc.add(new StringField(ID, t.id(), Field.Store.YES));
         addText(doc, TITLE, t.title());
-        addText(doc, ARTIST, t.artist());
-        addText(doc, GENRE, t.genre());
-        addText(doc, ALBUM, t.album());
-        addText(doc, LABEL, t.label());
-        addText(doc, COMMENT, t.comment());
         addKeyword(doc, TITLE_RAW, TITLE_RAW_NORMALIZED, t.title());
+        addText(doc, ARTIST, t.artist());
         addKeyword(doc, ARTIST_RAW, ARTIST_RAW_NORMALIZED, t.artist());
+        addText(doc, GENRE, t.genre());
         addKeyword(doc, GENRE_RAW, GENRE_RAW_NORMALIZED, t.genre());
-        doc.add(new StringField(KEY_CODE, normalize(t.key()), Field.Store.YES));
-        doc.add(new DoubleField(BPM, t.bpm(), Field.Store.YES));
-        doc.add(new IntField(RATING, t.rating(), Field.Store.YES));
-        doc.add(new IntField(YEAR, t.year(), Field.Store.YES));
         String genre = nfc(t.genre());
         if (!genre.isEmpty()) {
             doc.add(new SortedSetDocValuesFacetField(GENRE, genre));
         }
+        addText(doc, ALBUM, t.album());
+        addText(doc, LABEL, t.label());
+        addText(doc, COMMENT, t.comment());
+        doc.add(new StringField(KEY_CODE, normalize(t.key()), Field.Store.YES));
+        doc.add(new DoubleField(BPM, t.bpm(), Field.Store.YES));
+        doc.add(new IntField(RATING, t.rating(), Field.Store.YES));
+        doc.add(new IntField(YEAR, t.year(), Field.Store.YES));
         return doc;
     }
 

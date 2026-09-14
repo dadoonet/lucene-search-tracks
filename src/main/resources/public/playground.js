@@ -1,0 +1,862 @@
+const JAVA_KEYWORDS = new Set([
+  "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char",
+  "class", "const", "continue", "default", "do", "double", "else", "enum",
+  "extends", "final", "finally", "float", "for", "goto", "if", "implements",
+  "import", "instanceof", "int", "interface", "long", "native", "new",
+  "package", "private", "protected", "public", "return", "short", "static",
+  "strictfp", "super", "switch", "synchronized", "this", "throw", "throws",
+  "transient", "try", "void", "volatile", "while", "var", "record", "sealed",
+  "permits", "yield", "true", "false", "null"
+]);
+
+const chapters = {
+  analyze: {
+    kicker: "Part 1 · before the Document",
+    title: "Analyzer",
+    lede: "Start from the sentence. Apply each Lucene stage from the pane on the right.",
+    snippet: `Tokenizer source = new StandardTokenizer();
+TokenStream filter = new LowerCaseFilter(source);
+filter = new ASCIIFoldingFilter(filter);`,
+    render(root) {
+      analyzeStep = -1;
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">Text
+            <input id="text" type="text" value="Around The World" autocomplete="off">
+          </label>
+          <div class="presets">
+            ${preset("Around The World")}
+            ${preset("Ultra Naté")}
+            ${preset("Café del Mar — Around The World (François Kevorkian Mix)", "Café / François mix")}
+          </div>
+        </div>`;
+      bindText("text", () => runAnalyze());
+      root.querySelectorAll("[data-preset]").forEach((button) => {
+        button.onclick = () => {
+          document.getElementById("text").value = button.dataset.preset;
+          analyzeStep = -1;
+          runAnalyze();
+        };
+      });
+      runAnalyze();
+    }
+  },
+  map: {
+    kicker: "Part 1 · bean → Document",
+    title: "Mapping",
+    lede: "Pick a track. Lucene stores it as these fields — TextField for full text, StringField for an exact FILTER.",
+    snippet: `doc.add(new TextField("title", title, Store.YES));
+doc.add(new StringField("genre.raw.normalized", "club", Store.YES));
+doc.add(new DoubleField("bpm", 128.0, Store.YES));
+doc.add(new SortedSetDocValuesFacetField("genre", "Club"));`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">Track
+            <select id="map-track"></select>
+          </label>
+        </div>`;
+      runMap();
+    }
+  },
+  index: {
+    kicker: "Part 2 · ByteBuffersDirectory",
+    title: "Inverted index",
+    lede: "The term is no longer in the title — the title is in the term. Type a token, read the posting list.",
+    snippet: `Directory dir = new ByteBuffersDirectory();
+IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
+writer.addDocument(FacetsConfig.build(mapper.toDocument(track)));
+writer.commit();
+IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">Term
+            <input id="term" type="text" value="bob" autocomplete="off">
+          </label>
+          <label class="field">Field
+            <select id="index-field">
+              <option value="title" selected>title</option>
+              <option value="artist">artist</option>
+              <option value="genre">genre</option>
+              <option value="album">album</option>
+              <option value="label">label</option>
+              <option value="comment">comment</option>
+            </select>
+          </label>
+          <div class="presets">
+            ${preset("bob")}${preset("nate")}${preset("house")}
+          </div>
+        </div>`;
+      bindText("term", () => runIndex());
+      document.getElementById("index-field").onchange = () => runIndex();
+      root.querySelectorAll("[data-preset]").forEach((button) => {
+        button.onclick = () => {
+          document.getElementById("term").value = button.dataset.preset;
+          runIndex();
+        };
+      });
+      runIndex();
+    }
+  },
+  search: {
+    kicker: "Part 3 · BooleanQuery",
+    title: "Search",
+    lede: "Each analyzed token is a SHOULD across fields. The last token also gets a PrefixQuery. FILTER and MUST_NOT wrap that BooleanQuery.",
+    snippet: `BooleanQuery.Builder bqb = new BooleanQuery.Builder();
+bqb.add(new BoostQuery(new TermQuery(new Term("title", "bob")), 4.0f), BooleanClause.Occur.SHOULD);
+bqb.add(new BoostQuery(new PrefixQuery(new Term("title", "bob")), 1.0f), BooleanClause.Occur.SHOULD);
+bqb.setMinimumNumberShouldMatch(1);
+Query q = bqb.build();`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">q
+            <input id="q" type="text" value="Bob" autocomplete="off">
+          </label>
+          <label class="field">FILTER genre
+            <input id="genre" type="text" placeholder="Club" autocomplete="off">
+          </label>
+          <label class="field">MUST_NOT key
+            <input id="minus" type="text" placeholder="4A, 4B" autocomplete="off">
+          </label>
+          <div class="presets">
+            <button type="button" class="ghost" data-demo="bob">Bob → 62</button>
+            <button type="button" class="ghost" data-demo="club">+ Club → 26</button>
+            <button type="button" class="ghost" data-demo="keys">− 4A,4B → 23</button>
+            <button type="button" class="ghost" data-demo="prefix">bob sincla</button>
+            <button type="button" class="ghost" data-demo="ouse">ouse</button>
+          </div>
+        </div>`;
+      const apply = (q, genre, minus) => {
+        document.getElementById("q").value = q;
+        document.getElementById("genre").value = genre;
+        document.getElementById("minus").value = minus;
+        runSearch();
+      };
+      root.querySelector("[data-demo=bob]").onclick = () => apply("Bob", "", "");
+      root.querySelector("[data-demo=club]").onclick = () => apply("Bob", "Club", "");
+      root.querySelector("[data-demo=keys]").onclick = () => apply("Bob", "Club", "4A, 4B");
+      root.querySelector("[data-demo=prefix]").onclick = () => apply("bob sincla", "", "");
+      root.querySelector("[data-demo=ouse]").onclick = () => apply("ouse", "", "");
+      ["q", "genre", "minus"].forEach((id) => bindText(id, () => runSearch()));
+      runSearch();
+    }
+  },
+  suggest: {
+    kicker: "Part 4 · AnalyzingInfixSuggester",
+    title: "Suggest",
+    lede: "The payload says whether the suggestion is a title, artist, or genre. A genre chip becomes a FILTER, not free text.",
+    snippet: `suggester.lookup("club", Set.of(), 10, false, true);
+// payload = "genre" | "title" | "artist"
+Query chip = new TermQuery(new Term("genre.raw.normalized", "club house"));`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">Prefix
+            <input id="prefix" type="text" value="club" autocomplete="off">
+          </label>
+          <div class="presets">
+            ${preset("club")}${preset("Madonna")}${preset("sincla")}
+          </div>
+        </div>`;
+      bindText("prefix", () => runSuggest());
+      root.querySelectorAll("[data-preset]").forEach((button) => {
+        button.onclick = () => {
+          document.getElementById("prefix").value = button.dataset.preset;
+          runSuggest();
+        };
+      });
+      runSuggest();
+    }
+  },
+  facets: {
+    kicker: "Part 5 · DrillSideways",
+    title: "Facets",
+    lede: "Counts follow the query. A Club drill-down narrows BPM; other genres stay visible.",
+    snippet: `FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)
+    .facetsCollector();
+Facets genres = new SortedSetDocValuesFacetCounts(state, fc);
+Facets bpm = new DoubleRangeFacetCounts("bpm", fc, bpmRanges());
+new DrillSideways(searcher, config, state).search(drillDown, 1);`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">q
+            <input id="fq" type="text" value="Bob" autocomplete="off">
+          </label>
+          <label class="field">Drill-down genre
+            <input id="drill" type="text" placeholder="Club" autocomplete="off">
+          </label>
+          <div class="presets">
+            <button type="button" class="ghost" data-demo="bob">Bob</button>
+            <button type="button" class="ghost" data-demo="club">Bob + Club</button>
+          </div>
+        </div>`;
+      root.querySelector("[data-demo=bob]").onclick = () => {
+        document.getElementById("fq").value = "Bob";
+        document.getElementById("drill").value = "";
+        runFacets();
+      };
+      root.querySelector("[data-demo=club]").onclick = () => {
+        document.getElementById("fq").value = "Bob";
+        document.getElementById("drill").value = "Club";
+        runFacets();
+      };
+      ["fq", "drill"].forEach((id) => bindText(id, () => runFacets()));
+      runFacets();
+    }
+  }
+};
+
+function preset(value, label) {
+  const text = label == null ? value : label;
+  return `<button type="button" data-preset="${escapeAttr(value)}">${escapeHtml(text)}</button>`;
+}
+
+function bindText(id, fn) {
+  const el = document.getElementById(id);
+  let t;
+  el.addEventListener("input", () => {
+    clearTimeout(t);
+    t = setTimeout(fn, 160);
+  });
+}
+
+function escapeHtml(value) {
+  return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+function highlightJava(source) {
+  const rules = [
+    { type: "cmt", re: /^\/\/[^\n]*/ },
+    { type: "cmt", re: /^\/\*[\s\S]*?\*\// },
+    { type: "str", re: /^"(?:\\.|[^"\\])*"/ },
+    { type: "str", re: /^'(?:\\.|[^'\\])*'/ },
+    { type: "num", re: /^\d[\d_]*(\.\d+)?[fFdDlL]?/ },
+    { type: "word", re: /^[A-Za-z_$][A-Za-z0-9_$]*/ }
+  ];
+  let i = 0;
+  let out = "";
+  while (i < source.length) {
+    const rest = source.slice(i);
+    let hit = null;
+    for (const rule of rules) {
+      const match = rest.match(rule.re);
+      if (match) {
+        hit = { type: rule.type, text: match[0] };
+        break;
+      }
+    }
+    if (!hit) {
+      out += escapeHtml(rest[0]);
+      i += 1;
+      continue;
+    }
+    let type = hit.type;
+    if (type === "word") {
+      if (JAVA_KEYWORDS.has(hit.text)) {
+        type = "kw";
+      } else if (/^[A-Z][A-Z0-9_]+$/.test(hit.text)) {
+        type = "const";
+      } else if (/^[A-Z]/.test(hit.text)) {
+        type = "type";
+      } else {
+        type = "";
+      }
+    }
+    const escaped = escapeHtml(hit.text);
+    out += type ? `<span class="tok-${type}">${escaped}</span>` : escaped;
+    i += hit.text.length;
+  }
+  return out;
+}
+
+function setCues(tokens) {
+  document.getElementById("cues").innerHTML =
+      (tokens || []).map((token) => `<span class="cue">${escapeHtml(token)}</span>`).join("");
+}
+
+function readout(html) {
+  document.getElementById("readout").innerHTML = html;
+}
+
+async function getJson(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || response.statusText);
+  }
+  return response.json();
+}
+
+const ANALYZE_STEPS = [
+  { id: 0, label: "Tokenizer" },
+  { id: 1, label: "Lowercase" },
+  { id: 2, label: "Asciifolding" }
+];
+
+let analyzeStep = -1;
+let analyzeData = null;
+
+async function runAnalyze() {
+  const text = document.getElementById("text").value;
+  analyzeData = await getJson("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  });
+  setCues(analyzeData.tokens);
+  renderAnalyze();
+}
+
+function renderAnalyze() {
+  const data = analyzeData;
+  if (!data) {
+    return;
+  }
+  const tokenizer = data.stages?.[0]?.tokens || [];
+  const lower = data.stages?.[1]?.tokens || [];
+  const folded = data.stages?.[2]?.tokens || [];
+  const buttons = ANALYZE_STEPS.map((step) => `
+    <button type="button" class="ghost${analyzeStep === step.id ? " is-on" : ""}" data-step="${step.id}">
+      ${step.label}
+    </button>`).join("");
+  let body = `<p class="bbl-sentence">${escapeHtml(data.text)}</p>`;
+  if (analyzeStep >= 0) {
+    const columns = [tokenColumn(tokenizer)];
+    if (analyzeStep >= 1) {
+      columns.push(`<div class="bbl-arrow">→</div>`, tokenColumn(lower, tokenizer));
+    }
+    if (analyzeStep >= 2) {
+      columns.push(`<div class="bbl-arrow">→</div>`, tokenColumn(folded, lower));
+    }
+    body += `
+      <div class="bbl-down">↓</div>
+      <div class="bbl-flow">${columns.join("")}</div>`;
+  }
+  readout(`
+    <div class="bbl-steps" id="analyze-steps">${buttons}</div>
+    ${body}`);
+  document.querySelectorAll("#analyze-steps [data-step]").forEach((button) => {
+    button.onclick = () => {
+      analyzeStep = Number(button.dataset.step);
+      renderAnalyze();
+    };
+  });
+}
+
+function tokenColumn(tokens, previous) {
+  const lines = (tokens || []).map((token, i) => {
+    const body = previous ? diffChars(previous[i] || "", token) : escapeHtml(token);
+    return `<div class="bbl-token">${body}</div>`;
+  }).join("");
+  return `<div class="bbl-col">${lines || `<div class="muted">no tokens</div>`}</div>`;
+}
+
+function diffChars(from, to) {
+  if (from === to) {
+    return escapeHtml(to);
+  }
+  if (from.length === to.length) {
+    return [...to].map((ch, i) => {
+      const escaped = escapeHtml(ch);
+      return ch === from[i] ? escaped : `<span class="delta">${escaped}</span>`;
+    }).join("");
+  }
+  return `<span class="delta">${escapeHtml(to)}</span>`;
+}
+
+const TOKEN_PALETTE = ["#c8f27a", "#7eb6d9", "#f2cc8f", "#e5989b", "#c9a0dc", "#80cbc4", "#ffab91"];
+
+function coloredTokens(tokens) {
+  return (tokens || []).map((tok, i) => {
+    const color = TOKEN_PALETTE[i % TOKEN_PALETTE.length];
+    return `<span class="tok-pill" style="--tok:${color}">${escapeHtml(tok)}</span>`;
+  }).join(`<span class="tok-sep"> · </span>`);
+}
+
+function mapRole(field) {
+  let role = escapeHtml(field.role || "");
+  role = role.replace(
+      /numericValue\(\) = (\d+)/,
+      "numericValue() = <span class=\"ieee\">$1</span>");
+  if (field.tokenized && field.tokens && field.tokens.length) {
+    role += " · " + coloredTokens(field.tokens);
+  }
+  return role;
+}
+
+async function runMap() {
+  const select = document.getElementById("map-track");
+  const id = select ? select.value : "";
+  const data = await getJson("/api/map" + (id ? "?id=" + encodeURIComponent(id) : ""));
+  if (select && select.options.length === 0) {
+    select.innerHTML = (data.picks || []).map((pick) =>
+        `<option value="${escapeAttr(pick.id)}">${escapeHtml(pick.artist)} — ${escapeHtml(pick.title)}</option>`
+    ).join("");
+    select.onchange = () => runMap();
+  }
+  if (select) {
+    select.value = data.id;
+  }
+  setCues([]);
+  const groups = mapFieldGroups(data.fields);
+  setSnippet(mapSnippet(groups));
+  readout(`
+    <h3>${escapeHtml(data.artist)} — ${escapeHtml(data.title)}</h3>
+    ${groups.map((group) => `
+      <div class="map-group">
+        ${group.fields.map((field) => `
+          <div class="bucket">
+            <span>${escapeHtml(field.name)} <span class="muted">${escapeHtml(field.luceneType)}</span></span>
+            <span>${escapeHtml(field.value || "∅")}</span>
+          </div>
+          <p class="muted">${mapRole(field)}</p>
+        `).join("")}
+      </div>`).join("")}`);
+}
+
+async function runIndex() {
+  const term = document.getElementById("term").value;
+  const field = document.getElementById("index-field").value;
+  const data = await getJson(
+      "/api/index?term=" + encodeURIComponent(term) + "&field=" + encodeURIComponent(field));
+  setCues([data.term]);
+  const shown = (data.postings || []).length;
+  readout(`
+    <h3>${data.numDocs} docs · ${escapeHtml(data.directory)}</h3>
+    <p>${escapeHtml(data.field)}:${escapeHtml(data.term)}  df=${data.docFreq}</p>
+    <h3>Posting list</h3>
+    ${shown && shown < data.docFreq ? `<p class="muted">showing ${shown} of ${data.docFreq}</p>` : ""}
+    ${shown ? data.postings.map((p) => `
+      <div class="hit">
+        <span class="score">×${p.freq}</span>
+        <span>${escapeHtml(p.artist)} — ${escapeHtml(p.title)}</span>
+      </div>`).join("") : `<p class="muted">no postings</p>`}`);
+}
+
+function javaString(value) {
+  return `"${String(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+}
+
+function javaDouble(n) {
+  const s = String(n);
+  return s.includes(".") ? s : s + ".0";
+}
+
+function mapFieldRoot(field) {
+  if (field.luceneType === "SortedSetDocValuesFacetField") {
+    return "genre";
+  }
+  const name = field.name || "";
+  const dot = name.indexOf(".");
+  return dot === -1 ? name : name.slice(0, dot);
+}
+
+function mapFieldGroups(fields) {
+  const groups = [];
+  const byRoot = new Map();
+  for (const field of fields || []) {
+    const root = mapFieldRoot(field);
+    let group = byRoot.get(root);
+    if (!group) {
+      group = { root, fields: [] };
+      byRoot.set(root, group);
+      groups.push(group);
+    }
+    group.fields.push(field);
+  }
+  return groups;
+}
+
+function mapGroupComment(root) {
+  switch (root) {
+    case "id":
+      return "stored join key back to the Track bean";
+    case "title":
+    case "artist":
+      return `${root}: TextField is analyzed (MUST). .raw keeps the original for display. .raw.normalized is the exact FILTER.`;
+    case "genre":
+      return "genre: analyzed text, keyword FILTER (.raw.normalized), and SortedSet facet";
+    case "album":
+    case "label":
+    case "comment":
+      return `${root}: analyzed free text only — no keyword twin`;
+    case "key":
+      return "Camelot key — exact FILTER / MUST_NOT (lowercased)";
+    case "bpm":
+      return "numeric range + facets. numericValue() is IEEE 754 bits; read storedValue().getDoubleValue()";
+    case "rating":
+    case "year":
+      return `${root}: numeric facets (LongValueFacetCounts)`;
+    default:
+      return null;
+  }
+}
+
+function mapSnippet(groups) {
+  const lines = ["Document doc = new Document();"];
+  const genre = groups.flatMap((group) => group.fields)
+      .find((field) => field.name === "genre")?.value || "";
+  groups.forEach((group, index) => {
+    if (index > 0) {
+      lines.push("");
+    }
+    const comment = mapGroupComment(group.root);
+    if (comment) {
+      lines.push(`// ${comment}`);
+    }
+    for (const field of group.fields) {
+      if (field.luceneType === "SortedSetDocValuesFacetField") {
+        if (genre) {
+          lines.push(`doc.add(new SortedSetDocValuesFacetField("genre", ${javaString(genre)}));`);
+        }
+        continue;
+      }
+      const name = javaString(field.name);
+      if (field.luceneType === "DoubleField") {
+        const n = Number(field.value);
+        lines.push(`doc.add(new DoubleField(${name}, ${Number.isFinite(n) ? javaDouble(n) : "0.0"}, Store.YES));`);
+      } else if (field.luceneType === "IntField") {
+        const n = Number(field.value);
+        lines.push(`doc.add(new IntField(${name}, ${Number.isFinite(n) ? n : 0}, Store.YES));`);
+      } else {
+        lines.push(`doc.add(new ${field.luceneType}(${name}, ${javaString(field.value ?? "")}, Store.YES));`);
+      }
+    }
+  });
+  return lines.join("\n");
+}
+
+function javaFloat(n) {
+  const s = String(n);
+  return (s.includes(".") ? s : s + ".0") + "f";
+}
+
+function luceneNormalize(value) {
+  return String(value).normalize("NFC").toLowerCase();
+}
+
+function javaIdent(token, i, tokens) {
+  const base = /^[A-Za-z_][A-Za-z0-9_]*$/.test(token) ? token : `tok${i}`;
+  return tokens.filter((t) => t === token).length > 1 ? `${base}_${i}` : base;
+}
+
+const SEARCH_TEXT_FIELDS = [
+  { field: "title", boost: 4.0, prefixBoost: 1.0 },
+  { field: "artist", boost: 3.0, prefixBoost: 0.75 },
+  { field: "genre", boost: 2.0, prefixBoost: 0.5 },
+  { field: "album", boost: 1.5, prefixBoost: 0.375 },
+  { field: "label", boost: 1.0, prefixBoost: 0.25 },
+  { field: "comment", boost: 0.5, prefixBoost: 0.125 }
+];
+
+function tokenBuilderJava(token, prefix, declare) {
+  const lines = [
+    declare
+        ? "BooleanQuery.Builder bqb = new BooleanQuery.Builder();"
+        : "bqb = new BooleanQuery.Builder();"
+  ];
+  for (const { field, boost, prefixBoost } of SEARCH_TEXT_FIELDS) {
+    lines.push(
+        `bqb.add(new BoostQuery(new TermQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(boost)}), BooleanClause.Occur.SHOULD);`);
+    if (prefix) {
+      lines.push(
+          `bqb.add(new BoostQuery(new PrefixQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(prefixBoost)}), BooleanClause.Occur.SHOULD);`);
+    }
+  }
+  lines.push("bqb.setMinimumNumberShouldMatch(1);");
+  return lines;
+}
+
+function searchSnippet(tokens, genre, minus, explainDoc) {
+  const terms = (tokens || []).filter(Boolean);
+  const genreValue = (genre || "").trim();
+  const keys = (minus || "").trim() ? minus.split(/\s*,\s*/).filter(Boolean) : [];
+  const lines = [];
+  const explain = explainDoc == null ? "hits.scoreDocs[0].doc" : String(Number(explainDoc));
+  let declared = false;
+
+  const tokenQueries = [];
+  terms.forEach((token, i) => {
+    const prefix = i === terms.length - 1 && token.length >= 1;
+    lines.push(...tokenBuilderJava(token, prefix, !declared));
+    declared = true;
+    if (terms.length > 1) {
+      const name = javaIdent(token, i, terms);
+      lines.push(`Query ${name} = bqb.build();`);
+      tokenQueries.push(name);
+    }
+    lines.push("");
+  });
+
+  let textExpr = null;
+  if (terms.length === 1) {
+    textExpr = "bqb.build()";
+  } else if (terms.length > 1) {
+    lines.push(declared ? "bqb = new BooleanQuery.Builder();" : "BooleanQuery.Builder bqb = new BooleanQuery.Builder();");
+    declared = true;
+    tokenQueries.forEach((name) => {
+      lines.push(`bqb.add(${name}, BooleanClause.Occur.MUST);`);
+    });
+    lines.push("");
+    textExpr = "bqb.build()";
+  }
+
+  const genreQuery = genreValue
+      ? `new TermQuery(new Term("genre.raw.normalized", ${javaString(luceneNormalize(genreValue))}))`
+      : null;
+  let keyQuery = null;
+  if (keys.length === 1) {
+    keyQuery = `new TermQuery(new Term("key.code", ${javaString(luceneNormalize(keys[0]))}))`;
+  } else if (keys.length > 1) {
+    lines.push(declared ? "bqb = new BooleanQuery.Builder();" : "BooleanQuery.Builder bqb = new BooleanQuery.Builder();");
+    declared = true;
+    keys.forEach((key) => {
+      lines.push(
+          `bqb.add(new TermQuery(new Term("key.code", ${javaString(luceneNormalize(key))})), BooleanClause.Occur.SHOULD);`);
+    });
+    lines.push("bqb.setMinimumNumberShouldMatch(1);");
+    lines.push("Query key = bqb.build();");
+    lines.push("");
+    keyQuery = "key";
+  }
+
+  const needsRoot = Boolean(genreQuery || keyQuery);
+  if (!textExpr && !needsRoot) {
+    lines.push("Query q = new MatchAllDocsQuery();");
+  } else if (textExpr && !needsRoot) {
+    lines.push(`Query q = ${textExpr};`);
+  } else {
+    if (textExpr === "bqb.build()") {
+      lines.push("Query text = bqb.build();");
+      textExpr = "text";
+    }
+    lines.push(declared ? "bqb = new BooleanQuery.Builder();" : "BooleanQuery.Builder bqb = new BooleanQuery.Builder();");
+    if (textExpr) {
+      lines.push(`bqb.add(${textExpr}, BooleanClause.Occur.MUST);`);
+    } else if (keyQuery && !genreQuery) {
+      lines.push("bqb.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);");
+    }
+    if (genreQuery) {
+      lines.push(`bqb.add(${genreQuery}, BooleanClause.Occur.FILTER);`);
+    }
+    if (keyQuery) {
+      lines.push(`bqb.add(${keyQuery}, BooleanClause.Occur.MUST_NOT);`);
+    }
+    lines.push("Query q = bqb.build();");
+  }
+
+  lines.push(`TopDocs hits = searcher.search(q, 25);`);
+  lines.push(`searcher.explain(q, ${explain});`);
+  return lines.join("\n");
+}
+
+function setSnippet(source) {
+  document.getElementById("snippet").innerHTML = highlightJava(source);
+}
+
+async function runSearch(explainDoc) {
+  const q = document.getElementById("q").value;
+  const genre = document.getElementById("genre").value.trim();
+  const minus = document.getElementById("minus").value.trim();
+  const filters = {};
+  const mustNots = {};
+  if (genre) filters.genre = [genre];
+  if (minus) mustNots.key = minus.split(/\s*,\s*/).filter(Boolean);
+  const data = await getJson("/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      q,
+      filters,
+      mustNots,
+      explainDoc: explainDoc ?? null
+    })
+  });
+  setSnippet(searchSnippet(data.tokens, genre, minus, explainDoc));
+  setCues(data.tokens);
+  const explained = data.hits.find((hit) => hit.explain);
+  readout(`
+    <h3>${data.total} hits</h3>
+    <p>${escapeHtml(data.query)}</p>
+    ${(data.hits || []).map((hit) => `
+      <div class="hit" data-doc="${hit.luceneDoc}">
+        <span class="score">${hit.score.toFixed(2)}</span>
+        <span>${escapeHtml(hit.artist)} — ${escapeHtml(hit.title)}
+          <span class="muted"> · ${escapeHtml(hit.genre || "—")} · ${escapeHtml(hit.key || "—")}</span>
+        </span>
+      </div>`).join("") || `<p class="muted">no hits</p>`}
+    ${explained ? `<h3>Explanation · doc ${explained.luceneDoc}</h3><pre class="explain">${escapeHtml(explained.explain)}</pre>` : ""}`);
+  document.querySelectorAll(".hit[data-doc]").forEach((row) => {
+    row.onclick = () => runSearch(Number(row.dataset.doc));
+  });
+}
+
+async function runSuggest() {
+  const prefix = document.getElementById("prefix").value;
+  const data = await getJson("/api/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix })
+  });
+  setCues([prefix]);
+  readout(`
+    <h3>${data.hits.length} suggestions</h3>
+    ${(data.hits || []).map((hit) => `
+      <div class="bucket">
+        <span>${safeHighlight(hit.highlight)}</span>
+        <span class="muted">${escapeHtml(hit.field)}</span>
+      </div>`).join("") || `<p class="muted">nothing in the dictionary</p>`}`);
+}
+
+function safeHighlight(html) {
+  return escapeHtml(html || "")
+      .replaceAll("&lt;b&gt;", "<b>")
+      .replaceAll("&lt;/b&gt;", "</b>");
+}
+
+async function runFacets() {
+  const q = document.getElementById("fq").value;
+  const drillGenre = document.getElementById("drill").value.trim();
+  const data = await getJson("/api/facets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q, drillGenre })
+  });
+  setCues(q ? q.split(/\s+/) : []);
+  readout(`
+    <h3>${data.drillSideways ? "DrillSideways" : "FacetsCollector"}</h3>
+    <p class="muted">${escapeHtml(data.query)}</p>
+    ${data.dims.map((dim) => `
+      <h3>${dim.emoji} ${escapeHtml(dim.name)}</h3>
+      ${dim.buckets.map((bucket) => `
+        <div class="bucket${drillGenre && bucket.label === drillGenre ? " is-on" : ""}">
+          <span>${escapeHtml(bucket.label)}</span>
+          <span>${bucket.count}</span>
+        </div>`).join("")}
+    `).join("")}`);
+}
+
+function show(name) {
+  const chapter = chapters[name];
+  document.getElementById("snippet-kicker").textContent = chapter.kicker;
+  setSnippet(chapter.snippet);
+  document.getElementById("deck-title").textContent = chapter.title;
+  document.getElementById("deck-lede").textContent = chapter.lede;
+  document.querySelectorAll(".chapters button").forEach((button) => {
+    button.classList.toggle("is-on", button.dataset.chapter === name);
+  });
+  document.querySelector(".mixer").classList.toggle("is-analyze", name === "analyze");
+  document.querySelector(".mixer").classList.toggle("is-map", name === "map");
+  chapter.render(document.getElementById("controls"));
+}
+
+document.querySelectorAll(".chapters button").forEach((button) => {
+  button.onclick = () => show(button.dataset.chapter);
+});
+
+getJson("/api/meta").then((meta) => {
+  document.getElementById("meta").textContent =
+      `${meta.numDocs} docs · ${meta.directory} · corpus ${meta.corpusSize}`;
+}).catch((error) => {
+  document.getElementById("meta").textContent = error.message;
+});
+
+show("analyze");
+
+bindColumnResize();
+bindZoneZoom();
+
+function bindZoneZoom() {
+  const mixer = document.querySelector(".mixer");
+  const buttons = document.querySelectorAll(".zoom");
+  const labels = { snippet: "Java", deck: "chapter", lcd: "Lucene playground" };
+
+  const apply = (zone) => {
+    mixer.classList.toggle("is-max-snippet", zone === "snippet");
+    mixer.classList.toggle("is-max-deck", zone === "deck");
+    mixer.classList.toggle("is-max-lcd", zone === "lcd");
+    mixer.dataset.max = zone || "";
+    buttons.forEach((button) => {
+      const on = zone === button.dataset.zone;
+      const icon = button.querySelector("i");
+      icon.classList.toggle("fa-expand", !on);
+      icon.classList.toggle("fa-compress", on);
+      button.setAttribute(
+          "aria-label",
+          `${on ? "Reduce" : "Maximize"} ${labels[button.dataset.zone]}`);
+    });
+  };
+
+  buttons.forEach((button) => {
+    button.onclick = () => {
+      apply(mixer.dataset.max === button.dataset.zone ? "" : button.dataset.zone);
+    };
+  });
+}
+
+function bindColumnResize() {
+  const mixer = document.querySelector(".mixer");
+  const handle = document.getElementById("col-split");
+  if (!mixer || !handle) {
+    return;
+  }
+  const stored = localStorage.getItem("playground-stage-width");
+  if (stored) {
+    mixer.style.setProperty("--stage-width", stored);
+  }
+
+  const apply = (clientX) => {
+    const rect = mixer.getBoundingClientRect();
+    const min = 280;
+    const max = Math.max(min + 16, rect.width - 320);
+    const width = Math.round(Math.min(max, Math.max(min, clientX - rect.left)));
+    const value = `${width}px`;
+    mixer.style.setProperty("--stage-width", value);
+    localStorage.setItem("playground-stage-width", value);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    handle.classList.add("is-dragging");
+    document.body.classList.add("is-col-resize");
+    handle.setPointerCapture(event.pointerId);
+    apply(event.clientX);
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) {
+      return;
+    }
+    apply(event.clientX);
+  });
+  const stop = (event) => {
+    handle.classList.remove("is-dragging");
+    document.body.classList.remove("is-col-resize");
+    if (handle.hasPointerCapture(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+  };
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const stageWidth = mixer.querySelector(".stage").getBoundingClientRect().width;
+    const delta = event.key === "ArrowRight" ? 32 : -32;
+    apply(mixer.getBoundingClientRect().left + stageWidth + delta);
+  });
+}

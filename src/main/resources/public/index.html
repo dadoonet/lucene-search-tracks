@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lucene playground — Rekordbox</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&family=Oswald:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="/playground.css">
+</head>
+<body>
+  <header class="mast">
+    <div>
+      <p class="eyebrow">Rekordbox snapshot × Apache Lucene 10</p>
+      <h1>Playground</h1>
+    </div>
+    <p class="deck-count" id="meta">loading RAM index…</p>
+  </header>
+
+  <nav class="chapters" aria-label="Chapters">
+    <button type="button" data-chapter="analyze" class="is-on">1 Analyze</button>
+    <button type="button" data-chapter="map">2 Map</button>
+    <button type="button" data-chapter="index">3 Index</button>
+    <button type="button" data-chapter="search">4 Search</button>
+    <button type="button" data-chapter="suggest">5 Suggest</button>
+    <button type="button" data-chapter="facets">6 Facets</button>
+  </nav>
+
+  <main class="mixer">
+    <div class="stage">
+      <section class="panel snippet">
+        <div class="panel-head">
+          <h2>Java</h2>
+          <button type="button" class="zoom" data-zone="snippet" aria-label="Maximize Java">
+            <i class="fa-solid fa-expand" aria-hidden="true"></i>
+          </button>
+        </div>
+        <p class="panel-kicker" id="snippet-kicker">Part 1</p>
+        <pre class="java" id="snippet"></pre>
+      </section>
+      <section class="panel deck">
+        <div class="panel-head">
+          <h2 id="deck-title"></h2>
+          <button type="button" class="zoom" data-zone="deck" aria-label="Maximize chapter">
+            <i class="fa-solid fa-expand" aria-hidden="true"></i>
+          </button>
+        </div>
+        <p class="lede" id="deck-lede"></p>
+        <div id="controls"></div>
+        <div class="waveform" aria-hidden="true">
+          <div class="waveform-bars"></div>
+          <div class="cues" id="cues"></div>
+        </div>
+      </section>
+    </div>
+    <div class="splitter" id="col-split" role="separator" aria-orientation="vertical" aria-label="Resize columns" tabindex="0"></div>
+    <section class="panel lcd">
+      <div class="panel-head">
+        <h2>Lucene playground</h2>
+        <button type="button" class="zoom" data-zone="lcd" aria-label="Maximize Lucene playground">
+          <i class="fa-solid fa-expand" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div id="readout"></div>
+    </section>
+  </main>
+
+  <footer>
+    Maven tests remain the contract for the posts. This UI is Lucene at work.
+  </footer>
+  <script src="/playground.js"></script>
+</body>
+</html>
