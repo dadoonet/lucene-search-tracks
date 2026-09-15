@@ -292,7 +292,7 @@ Map<String, String[]> hl = highlighter.highlightFields(
   demo: {
     kicker: "All together",
     title: "Demo",
-    lede: "Type to search. A genre or artist suggestion pins a chip; a title fills the bar. Click a chip to flip filter in / filter out. Highlighted fields show where the query matched.",
+    lede: "Type to search. A genre or artist suggestion pins a chip; a title fills the bar. Click a Camelot slice to filter by key. Click a chip to flip filter in / filter out. Highlighted fields show where the query matched.",
     snippet: `Query q = TrackLuceneQueryBuilder.buildStructured(text, filters, mustNots);
 TopDocs hits = searcher.search(q, 25);
 UnifiedHighlighter.builder(searcher, analyzer).build()
@@ -300,6 +300,7 @@ UnifiedHighlighter.builder(searcher, analyzer).build()
 new DrillSideways(searcher, config, state).search(drillDown, 1);`,
     render(root) {
       demoState = { chips: [], suggest: [], open: false, gen: 0 };
+      const demoQ = new URLSearchParams(location.search).get("q") || "";
       root.innerHTML = `
         <div class="demo">
           <div class="demo-search">
@@ -307,7 +308,7 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
               <span class="demo-q-kicker">Search</span>
               <span class="demo-q-row">
                 <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                <input id="demo-q" type="search" value="" autocomplete="off" spellcheck="false" placeholder="title, artist, genre…">
+                <input id="demo-q" type="search" value="${escapeAttr(demoQ)}" autocomplete="off" spellcheck="false" placeholder="title, artist, genre…">
               </span>
             </label>
             <ul id="demo-suggest" class="demo-suggest" hidden></ul>
@@ -1277,7 +1278,7 @@ function renderSuggest() {
       <div class="suggest-hit" data-suggest-index="${i}" data-suggest-part="row">
         <span class="muted" data-suggest-part="lookup">matches.get(${i})</span>
         <span data-suggest-part="highlight">${safeHighlight(hit.highlight)}</span>
-        <span data-suggest-part="payload">${escapeHtml(hit.field)}</span>
+        <span class="suggest-field" data-suggest-part="payload"><i class="fa-solid ${suggestIcon(hit.field)}" aria-hidden="true"></i>${escapeHtml(hit.field)}</span>
       </div>`).join("");
   setSuggestSnippet();
   readout(`
@@ -1454,7 +1455,7 @@ async function runFacets() {
     ${facetRewriteHtml(data.rewrite)}
     <h3>${data.drillSideways ? "DrillSideways" : "FacetsCollector"}</h3>
     <p class="muted">${escapeHtml(data.query)}</p>
-    ${data.dims.map((dim) => `
+    ${data.dims.filter((dim) => dim.name !== "key").map((dim) => `
       <h3>${dim.emoji} ${escapeHtml(dim.name)}</h3>
       ${dim.buckets.map((bucket) => `
         <div class="bucket${drillGenre && bucket.label === drillGenre ? " is-on" : ""}">
@@ -1557,7 +1558,7 @@ function suggestType(field) {
 function suggestIcon(field) {
   switch (suggestType(field)) {
     case "genre": return "fa-tag";
-    case "artist": return "fa-circle-user";
+    case "artist": return "fa-user";
     default: return "fa-music";
   }
 }
@@ -1612,6 +1613,11 @@ function bindDemo() {
     }
   });
   document.getElementById("demo-facets").addEventListener("click", (event) => {
+    const slot = event.target.closest("[data-camelot-key]");
+    if (slot) {
+      toggleCamelotKey(slot.dataset.camelotKey, slot.classList.contains("is-empty"));
+      return;
+    }
     const bucket = event.target.closest("[data-facet-dim]");
     if (!bucket) {
       return;
@@ -1619,6 +1625,17 @@ function bindDemo() {
     addDemoChip(bucket.dataset.facetDim, bucket.dataset.facetValue);
     renderDemoChips();
     runDemo();
+  });
+  document.getElementById("demo-facets").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    const slot = event.target.closest("[data-camelot-key]");
+    if (!slot) {
+      return;
+    }
+    event.preventDefault();
+    toggleCamelotKey(slot.dataset.camelotKey, slot.classList.contains("is-empty"));
   });
 }
 
@@ -1744,8 +1761,90 @@ async function runDemo() {
   ].join("\n"));
 }
 
+function toggleCamelotKey(value, empty) {
+  if (empty) {
+    return;
+  }
+  if (demoChipIndex("key", value) >= 0) {
+    removeDemoChip("key", value);
+  } else {
+    addDemoChip("key", value);
+  }
+  renderDemoChips();
+  runDemo();
+}
+
 function facetBucketLabel(dim, value) {
-  return dim === "rating" ? starRow(value) : escapeHtml(value);
+  if (dim === "rating") {
+    return starRow(value);
+  }
+  if (dim === "key") {
+    return keyBadge(value);
+  }
+  return escapeHtml(value);
+}
+
+function polar(cx, cy, r, degFromTop) {
+  const a = (degFromTop - 90) * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+
+function annularPath(cx, cy, innerR, outerR, startDeg, endDeg) {
+  const pt = (r, d) => polar(cx, cy, r, d);
+  const [x0, y0] = pt(outerR, startDeg);
+  const [x1, y1] = pt(outerR, endDeg);
+  const [x2, y2] = pt(innerR, endDeg);
+  const [x3, y3] = pt(innerR, startDeg);
+  const large = endDeg - startDeg > 180 ? 1 : 0;
+  const n = (value) => value.toFixed(2);
+  return `M${n(x0)} ${n(y0)} A${outerR} ${outerR} 0 ${large} 1 ${n(x1)} ${n(y1)} L${n(x2)} ${n(y2)} A${innerR} ${innerR} 0 ${large} 0 ${n(x3)} ${n(y3)} Z`;
+}
+
+function renderCamelotWheel(dim) {
+  const byLabel = Object.fromEntries((dim.buckets || []).map((bucket) => [bucket.label, bucket]));
+  const cx = 100;
+  const cy = 100;
+  const rings = [
+    { mode: "B", inner: 68, outer: 98 },
+    { mode: "A", inner: 36, outer: 66 }
+  ];
+  const slots = [];
+  for (const ring of rings) {
+    for (let n = 1; n <= 12; n++) {
+      const label = `${n}${ring.mode}`;
+      const bucket = byLabel[label] || { label, count: 0 };
+      const start = (n - 1) * 30 - 15 + 0.4;
+      const end = (n - 1) * 30 + 15 - 0.4;
+      const [lx, ly] = polar(cx, cy, (ring.inner + ring.outer) / 2, (n - 1) * 30);
+      const index = demoChipIndex("key", label);
+      const mode = index < 0 ? "" : demoState.chips[index].mode;
+      const empty = Number(bucket.count) === 0;
+      const classes = [
+        "camelot-slot",
+        `camelot-${label.toLowerCase()}`,
+        empty ? "is-empty" : "",
+        mode ? `is-${mode}` : ""
+      ].filter(Boolean).join(" ");
+      const title = `${label} · ${bucket.count}`;
+      const pressed = mode === "in" ? "true" : "false";
+      slots.push(`
+        <g class="${classes}" data-camelot-key="${escapeAttr(label)}" ${empty
+          ? `aria-disabled="true"`
+          : `role="button" tabindex="0" aria-pressed="${pressed}"`} aria-label="${escapeAttr(title)}">
+          <title>${escapeHtml(title)}</title>
+          <path class="camelot-wedge" d="${annularPath(cx, cy, ring.inner, ring.outer, start, end)}"></path>
+          <text class="camelot-label${ring.mode === "A" ? " is-inner" : ""}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}">${escapeHtml(label)}</text>
+        </g>`);
+    }
+  }
+  return `
+    <section class="camelot-wheel-wrap">
+      <h3>${dim.emoji} ${escapeHtml(dim.name)}</h3>
+      <svg class="camelot-wheel" viewBox="0 0 200 200" aria-label="Camelot key filter">
+        ${slots.join("")}
+        <circle class="camelot-hub" cx="100" cy="100" r="32"></circle>
+      </svg>
+    </section>`;
 }
 
 function renderDemoFacets(dims) {
@@ -1753,7 +1852,9 @@ function renderDemoFacets(dims) {
   if (!host) {
     return;
   }
-  host.innerHTML = dims.map((dim) => `
+  const keyDim = (dims || []).find((dim) => dim.name === "key");
+  const others = (dims || []).filter((dim) => dim.name !== "key");
+  host.innerHTML = `${others.map((dim) => `
     <section>
       <h3>${dim.emoji} ${escapeHtml(dim.name)}</h3>
       ${(dim.buckets || []).map((bucket) => {
@@ -1766,7 +1867,7 @@ function renderDemoFacets(dims) {
           <span>${bucket.count}</span>
         </button>`;
       }).join("")}
-    </section>`).join("");
+    </section>`).join("")}${keyDim ? renderCamelotWheel(keyDim) : ""}`;
 }
 
 function renderDemoHits(search) {
@@ -1831,7 +1932,9 @@ getJson("/api/meta").then((meta) => {
   document.getElementById("meta").textContent = error.message;
 });
 
-show("analyze");
+show(new URLSearchParams(location.search).get("chapter") in chapters
+    ? new URLSearchParams(location.search).get("chapter")
+    : "analyze");
 
 bindColumnResize();
 bindZoneZoom();

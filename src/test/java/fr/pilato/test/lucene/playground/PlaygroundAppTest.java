@@ -105,12 +105,17 @@ class PlaygroundAppTest {
                     .contains("mustNots")
                     .contains("fa-music")
                     .contains("fa-tag")
-                    .contains("fa-circle-user")
+                    .contains("fa-user")
                     .contains("<th>Rating</th>")
                     .contains("<th>Key</th>")
                     .contains("starRow(hit.rating)")
                     .contains("keyBadge(hit.key)")
                     .contains("camelot-badge")
+                    .contains("renderCamelotWheel")
+                    .contains("data-camelot-key")
+                    .contains("toggleCamelotKey")
+                    .contains("annularPath")
+                    .contains("get(\"chapter\")")
                     .contains("facetBucketLabel")
                     .contains("hit.highlights")
                     .contains("UnifiedHighlighter")
@@ -127,7 +132,9 @@ class PlaygroundAppTest {
                     .contains("AnalyzingInfixSuggester suggester")
                     .contains("bindSuggestHover")
                     .contains("highlightKey")
-                    .contains("matches.get(");
+                    .contains("matches.get(")
+                    .contains("suggest-field")
+                    .contains("suggestIcon(hit.field)");
         });
     }
 
@@ -153,6 +160,9 @@ class PlaygroundAppTest {
                     .contains(".camelot-1a")
                     .contains(".camelot-12b")
                     .contains(".camelot-unknown")
+                    .contains(".camelot-wheel")
+                    .contains("opacity: 0.1")
+                    .contains("--camelot:")
                     .contains(".stars .fa-regular")
                     .contains("width: 2.6em")
                     .contains("[data-chapter=\"demo\"]")
@@ -161,7 +171,8 @@ class PlaygroundAppTest {
                     .contains(".demo-table b")
                     .contains(".hl-field")
                     .contains("#readout b")
-                    .contains(".suggest-hit");
+                    .contains(".suggest-hit")
+                    .contains(".suggest-field");
         });
     }
 }

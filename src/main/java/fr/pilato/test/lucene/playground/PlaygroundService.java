@@ -32,8 +32,11 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
@@ -48,6 +51,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -368,6 +372,11 @@ public final class PlaygroundService implements AutoCloseable {
         Map<String, List<String>> withoutGenre = new LinkedHashMap<>(include);
         withoutGenre.remove("genre");
         Query base = TrackLuceneQueryBuilder.buildStructured(queryText, withoutGenre, exclude);
+        Map<String, List<String>> withoutKey = new LinkedHashMap<>(include);
+        withoutKey.remove("key");
+        Map<String, List<String>> excludeWithoutKey = new LinkedHashMap<>(exclude);
+        excludeWithoutKey.remove("key");
+        Query keyBase = TrackLuceneQueryBuilder.buildStructured(queryText, withoutKey, excludeWithoutKey);
         IndexSearcher searcher = index.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             var state = new DefaultSortedSetDocValuesReaderState(reader, TrackFacets.config());
@@ -392,9 +401,10 @@ public final class PlaygroundService implements AutoCloseable {
                     String.join(", ", genres),
                     List.of(
                             dim("genre", "🏷️", children(facets.getAllChildren(TrackFacets.GENRE), 12)),
-                            dim("bpm", "⏱", bpmBuckets(facets.getAllChildren(TrackDocumentMapper.BPM))),
                             dim("rating", "⭐", ratings(facets.getAllChildren(TrackDocumentMapper.RATING))),
-                            dim("year", "📅", decades(facets.getAllChildren(TrackDocumentMapper.YEAR)))),
+                            dim("year", "📅", decades(facets.getAllChildren(TrackDocumentMapper.YEAR))),
+                            dim("bpm", "⏱", bpmBuckets(facets.getAllChildren(TrackDocumentMapper.BPM))),
+                            dim(TrackFacets.KEY, "🎹", camelotKeys(searcher, keyBase))),
                     facetRewrite());
         }
     }
@@ -465,6 +475,27 @@ public final class PlaygroundService implements AutoCloseable {
 
     private static FacetDim dim(String name, String emoji, List<FacetBucket> buckets) {
         return new FacetDim(name, emoji, buckets);
+    }
+
+    /** Always 1A…12B, including empty slots. Ignores an active key FILTER / MUST_NOT. */
+    private static List<FacetBucket> camelotKeys(IndexSearcher searcher, Query base) throws IOException {
+        List<FacetBucket> buckets = new ArrayList<>(TrackFacets.CAMELOT_CODES.size());
+        for (String code : TrackFacets.CAMELOT_CODES) {
+            buckets.add(new FacetBucket(code, searcher.count(withKey(base, code))));
+        }
+        return List.copyOf(buckets);
+    }
+
+    private static Query withKey(Query base, String code) {
+        Query term = new TermQuery(new Term(
+                TrackDocumentMapper.KEY_CODE, code.toLowerCase(Locale.ROOT)));
+        if (base instanceof MatchAllDocsQuery) {
+            return term;
+        }
+        return new BooleanQuery.Builder()
+                .add(base, BooleanClause.Occur.MUST)
+                .add(term, BooleanClause.Occur.FILTER)
+                .build();
     }
 
     private static List<FacetBucket> children(FacetResult result, int limit) {

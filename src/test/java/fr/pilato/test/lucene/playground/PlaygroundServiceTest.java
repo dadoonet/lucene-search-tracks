@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+import static fr.pilato.test.lucene.TrackFacets.CAMELOT_CODES;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetBucket;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.SearchRequest;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -310,6 +311,26 @@ class PlaygroundServiceTest {
         List<String> years = labels(bob, "year");
         assertThat(years).isNotEmpty()
                 .isSortedAccordingTo(Comparator.comparingInt(label -> Integer.parseInt(label.substring(0, 4))));
+    }
+
+    @Test
+    void facets_keyShowsAllCamelotSlotsAndIgnoresKeyFilter() throws Exception {
+        var bob = service.facets("Bob", "");
+        assertThat(bob.dims()).extracting(PlaygroundModels.FacetDim::name)
+                .containsExactly("genre", "rating", "year", "bpm", "key");
+        assertThat(labels(bob, "key")).containsExactlyElementsOf(CAMELOT_CODES);
+        long fourB = count(bob, "key", "4B");
+        long fourA = count(bob, "key", "4A");
+        assertThat(fourB).isGreaterThan(0);
+
+        var filtered = service.facets("Bob", Map.of("key", List.of("4B")), Map.of());
+        assertThat(count(filtered, "key", "4B")).isEqualTo(fourB);
+        assertThat(count(filtered, "key", "4A")).isEqualTo(fourA);
+
+        var nate = service.facets("Ultra Naté", "");
+        assertThat(labels(nate, "key")).hasSize(24);
+        assertThat(nate.dims().getLast().buckets().stream().anyMatch(bucket -> bucket.count() == 0))
+                .isTrue();
     }
 
     @Test
