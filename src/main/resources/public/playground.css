@@ -268,15 +268,18 @@ body.is-col-resize * {
   min-height: 1.55em;
 }
 
-.java-line.is-on {
+.java-line.is-on,
+.java-fold.is-on .java-fold-bar .java-line {
   background: color-mix(in srgb, var(--cue) 22%, transparent);
   box-shadow: inset 3px 0 0 var(--cue);
 }
 
 .java-line[data-map-root],
+.java-line[data-explain-keys],
 .map-group[data-map-root],
 .track-card-title[data-map-root],
-.track-card-row[data-map-root] {
+.track-card-row[data-map-root],
+.explain-line[data-explain-keys] {
   cursor: default;
 }
 
@@ -730,11 +733,30 @@ input[type="text"], select {
   margin: 0.15rem 0 0.25rem;
 }
 
-pre.explain {
+pre.explain,
+.explain {
   white-space: pre-wrap;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 0.68rem;
   color: var(--phosphor-dim);
   margin: 0.4rem 0 0;
+}
+
+.explain-line {
+  display: block;
+  margin: 0 -0.35rem;
+  padding: 0.02rem 0.35rem 0.02rem calc(0.35rem + (var(--depth, 0) * 0.85rem));
+  border-radius: 2px;
+}
+
+.explain-line.is-on {
+  background: color-mix(in srgb, var(--cue) 22%, transparent);
+  box-shadow: inset 3px 0 0 var(--cue);
+  color: var(--phosphor);
+}
+
+.explain-value {
+  color: #8ec8ff;
 }
 
 footer {

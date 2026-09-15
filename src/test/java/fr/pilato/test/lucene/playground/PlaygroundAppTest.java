@@ -61,4 +61,29 @@ class PlaygroundAppTest {
                     .contains("href=\"https://david.pilato.fr/\">David Pilato</a>");
         });
     }
+
+    @Test
+    void search_returnsExplainTreeKeys() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.post("/api/search", """
+                    {"q":"Bob","filters":{},"mustNots":{}}
+                    """);
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains("\"explainTree\"")
+                    .contains("term:title:bob")
+                    .contains("prefix:title:bob");
+        });
+    }
+
+    @Test
+    void playgroundJs_wiresExplainHover() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/playground.js");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains("bindExplainHover")
+                    .contains("data-explain-keys");
+        });
+    }
 }

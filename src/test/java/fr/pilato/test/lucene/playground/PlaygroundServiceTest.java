@@ -202,6 +202,26 @@ class PlaygroundServiceTest {
     }
 
     @Test
+    void search_completeQueryExplainTreeLinksClauses() throws Exception {
+        var result = service.search(new SearchRequest(
+                "bob sinclar house",
+                Map.of("genre", List.of("Club")),
+                Map.of("key", List.of("4A", "4B")),
+                null));
+        var tree = result.hits().getFirst().explainTree();
+        assertThat(tree).isNotNull();
+        assertThat(tree.keys()).containsExactly("bool");
+        assertThat(flattenKeys(tree))
+                .contains("bool", "filter:genre", "token:bob", "token:sinclar", "token:house");
+    }
+
+    private static List<String> flattenKeys(PlaygroundModels.ExplainNode node) {
+        List<String> keys = new java.util.ArrayList<>(node.keys());
+        node.details().forEach(child -> keys.addAll(flattenKeys(child)));
+        return keys;
+    }
+
+    @Test
     void suggest_clubReturnsGenreAndTitle() throws Exception {
         assertThat(service.suggest("club").hits())
                 .extracting(PlaygroundModels.SuggestHitView::text, PlaygroundModels.SuggestHitView::field)

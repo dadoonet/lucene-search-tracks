@@ -804,6 +804,12 @@ function searchBuilderName(token, i, used) {
   return name;
 }
 
+function searchIdentFrom(value, fallback, used) {
+  const folded = luceneNormalize(value).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const candidate = /^[A-Za-z_]/.test(folded) ? folded : `k${folded}`;
+  return searchBuilderName(candidate || fallback, 0, used);
+}
+
 const SEARCH_TEXT_FIELDS = [
   { field: "title", boost: 4.0, prefixBoost: 1.0 },
   { field: "artist", boost: 3.0, prefixBoost: 0.75 },
@@ -814,20 +820,29 @@ const SEARCH_TEXT_FIELDS = [
 ];
 
 function tokenBuilderBody(token, prefix) {
-  const lines = ["BooleanQuery.Builder bqb = new BooleanQuery.Builder();"];
+  const tokenKey = `token:${token}`;
+  const lines = [{ code: "BooleanQuery.Builder bqb = new BooleanQuery.Builder();", keys: [tokenKey] }];
   for (const { field, boost, prefixBoost } of SEARCH_TEXT_FIELDS) {
-    lines.push(
-        `bqb.add(new BoostQuery(new TermQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(boost)}), BooleanClause.Occur.SHOULD);`);
+    lines.push({
+      code: `bqb.add(new BoostQuery(new TermQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(boost)}), BooleanClause.Occur.SHOULD);`,
+      keys: [`term:${field}:${token}`]
+    });
     if (prefix) {
-      lines.push(
-          `bqb.add(new BoostQuery(new PrefixQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(prefixBoost)}), BooleanClause.Occur.SHOULD);`);
+      lines.push({
+        code: `bqb.add(new BoostQuery(new PrefixQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(prefixBoost)}), BooleanClause.Occur.SHOULD);`,
+        keys: [`prefix:${field}:${token}`]
+      });
     }
   }
-  lines.push("bqb.setMinimumNumberShouldMatch(1);");
+  lines.push({ code: "bqb.setMinimumNumberShouldMatch(1);", keys: [tokenKey] });
   return lines;
 }
 
 const searchFoldOpen = new Set();
+
+function searchLine(code, ...keys) {
+  return { type: "line", code, keys };
+}
 
 function searchSnippetBlocks(q, tokens, genre, minus, explainDoc) {
   const terms = (tokens || []).filter(Boolean);
@@ -835,98 +850,130 @@ function searchSnippetBlocks(q, tokens, genre, minus, explainDoc) {
   const keyValues = (minus || "").trim() ? minus.split(/\s*,\s*/).filter(Boolean) : [];
   const explain = explainDoc == null ? "hits.scoreDocs[0].doc" : String(Number(explainDoc));
   const blocks = [
-    { type: "line", code: "// Open an index searcher using the same writer" },
-    { type: "line", code: "IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));" },
-    { type: "line", code: "" }
+    searchLine("// Open an index searcher using the same writer"),
+    searchLine("IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));"),
+    searchLine("")
   ];
 
   if (String(q ?? "").trim()) {
-    blocks.push({ type: "line", code: `TokenStream ts = analyzer.tokenStream("title", ${javaString(q)});` });
-    blocks.push({
-      type: "line",
-      code: terms.length ? `// → ${terms.join(", ")}` : "// → (no tokens)"
-    });
-    blocks.push({ type: "line", code: "" });
+    blocks.push(searchLine(`TokenStream ts = analyzer.tokenStream("title", ${javaString(q)});`));
+    blocks.push(searchLine(terms.length ? `// → ${terms.join(", ")}` : "// → (no tokens)"));
+    blocks.push(searchLine(""));
   }
 
   const used = new Set(SEARCH_RESERVED);
   const builders = terms.map((token, i) => {
     const name = searchBuilderName(token, i, used);
     const prefix = i === terms.length - 1 && token.length >= 1;
-    blocks.push({ type: "line", code: `// build query for ${token}` });
+    blocks.push(searchLine(`// build query for ${token}`));
     blocks.push({
       type: "fold",
       id: name,
+      keys: [`token:${token}`],
       summary: `BooleanQuery.Builder ${name} = buildQuery(${javaString(token)});`,
       body: tokenBuilderBody(token, prefix)
     });
-    blocks.push({ type: "line", code: "" });
+    blocks.push(searchLine(""));
     return name;
   });
 
-  const genreQuery = genreValue
-      ? `new TermQuery(new Term("genre.raw.normalized", ${javaString(luceneNormalize(genreValue))}))`
-      : null;
-  let keyQuery = null;
+  let genreIdent = null;
+  if (genreValue) {
+    const normalized = luceneNormalize(genreValue);
+    genreIdent = searchIdentFrom(genreValue, "genre", used);
+    blocks.push(searchLine(`// Single filter on genre for ${normalized}`));
+    blocks.push(searchLine(
+        `Query ${genreIdent} = new TermQuery(new Term("genre.raw.normalized", ${javaString(normalized)}));`,
+        "filter:genre"));
+    blocks.push(searchLine(""));
+  }
+
+  let keyExpr = null;
   if (keyValues.length === 1) {
-    keyQuery = `new TermQuery(new Term("key.code", ${javaString(luceneNormalize(keyValues[0]))}))`;
+    const normalized = luceneNormalize(keyValues[0]);
+    const ident = searchIdentFrom(keyValues[0], "excluded", used);
+    blocks.push(searchLine(`// Filter on key ${normalized}`));
+    blocks.push(searchLine(
+        `Query ${ident} = new TermQuery(new Term("key.code", ${javaString(normalized)}));`,
+        "mustnot:key"));
+    blocks.push(searchLine(""));
+    keyExpr = ident;
   } else if (keyValues.length > 1) {
-    blocks.push({ type: "line", code: "BooleanQuery.Builder keys = new BooleanQuery.Builder();" });
+    const labels = keyValues.map((key) => luceneNormalize(key)).join(" or ");
+    blocks.push(searchLine(`// Filter on keys ${labels}`));
+    blocks.push(searchLine("BooleanQuery.Builder keys = new BooleanQuery.Builder();", "mustnot:key"));
     keyValues.forEach((key) => {
-      blocks.push({
-        type: "line",
-        code: `keys.add(new TermQuery(new Term("key.code", ${javaString(luceneNormalize(key))})), BooleanClause.Occur.SHOULD);`
-      });
+      blocks.push(searchLine(
+          `keys.add(new TermQuery(new Term("key.code", ${javaString(luceneNormalize(key))})), BooleanClause.Occur.SHOULD);`,
+          "mustnot:key"));
     });
-    blocks.push({ type: "line", code: "keys.setMinimumNumberShouldMatch(1);" });
-    blocks.push({ type: "line", code: "Query key = keys.build();" });
-    blocks.push({ type: "line", code: "" });
-    keyQuery = "key";
+    blocks.push(searchLine("keys.setMinimumNumberShouldMatch(1);", "mustnot:key"));
+    blocks.push(searchLine(""));
+    keyExpr = "keys.build()";
   }
 
-  const needsBool = builders.length > 1 || Boolean(genreQuery || keyQuery);
-  if (!builders.length && !genreQuery && !keyQuery) {
-    blocks.push({ type: "line", code: "Query q = new MatchAllDocsQuery();" });
+  const needsBool = builders.length > 1 || Boolean(genreIdent || keyExpr);
+  if (!builders.length && !genreIdent && !keyExpr) {
+    blocks.push(searchLine("Query q = new MatchAllDocsQuery();"));
   } else if (builders.length === 1 && !needsBool) {
-    blocks.push({ type: "line", code: `Query q = ${builders[0]}.build();` });
+    blocks.push(searchLine(`Query q = ${builders[0]}.build();`, `token:${terms[0]}`));
   } else {
-    blocks.push({ type: "line", code: "// Combine queries in a bool query" });
-    blocks.push({ type: "line", code: "BooleanQuery.Builder bool = new BooleanQuery.Builder();" });
-    builders.forEach((name) => {
-      blocks.push({
-        type: "line",
-        code: `bool.add(${name}.build(), BooleanClause.Occur.MUST);`
-      });
+    blocks.push(searchLine("// Combine queries in a bool query"));
+    blocks.push(searchLine("BooleanQuery.Builder bool = new BooleanQuery.Builder();", "bool"));
+    builders.forEach((name, i) => {
+      blocks.push(searchLine(
+          `bool.add(${name}.build(), BooleanClause.Occur.MUST);`,
+          "bool",
+          `token:${terms[i]}`));
     });
-    if (!builders.length && keyQuery && !genreQuery) {
-      blocks.push({
-        type: "line",
-        code: "bool.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);"
-      });
+    if (!builders.length && keyExpr && !genreIdent) {
+      blocks.push(searchLine("bool.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);", "bool"));
     }
-    if (genreQuery) {
-      blocks.push({ type: "line", code: `bool.add(${genreQuery}, BooleanClause.Occur.FILTER);` });
+    if (genreIdent) {
+      blocks.push(searchLine("// Filter in"));
+      blocks.push(searchLine(`bool.add(${genreIdent}, BooleanClause.Occur.FILTER);`, "bool", "filter:genre"));
     }
-    if (keyQuery) {
-      blocks.push({ type: "line", code: `bool.add(${keyQuery}, BooleanClause.Occur.MUST_NOT);` });
+    if (keyExpr) {
+      blocks.push(searchLine("// Filter out"));
+      blocks.push(searchLine(`bool.add(${keyExpr}, BooleanClause.Occur.MUST_NOT);`, "bool", "mustnot:key"));
     }
-    blocks.push({ type: "line", code: "Query q = bool.build();" });
+    blocks.push(searchLine("Query q = bool.build();", "bool"));
   }
 
-  blocks.push({ type: "line", code: "" });
-  blocks.push({ type: "line", code: "// Search and retrieve the 10 first hits" });
-  blocks.push({ type: "line", code: "TopDocs hits = searcher.search(q, 10);" });
-  blocks.push({ type: "line", code: "" });
-  blocks.push({ type: "line", code: "// Explain how the score is computed for the first hit" });
-  blocks.push({ type: "line", code: `searcher.explain(q, ${explain});` });
+  blocks.push(searchLine(""));
+  blocks.push(searchLine("// Search and retrieve the 10 first hits"));
+  blocks.push(searchLine("TopDocs hits = searcher.search(q, 10);"));
+  blocks.push(searchLine(""));
+  blocks.push(searchLine("// Explain how the score is computed for the first hit"));
+  blocks.push(searchLine(`searcher.explain(q, ${explain});`));
   return blocks;
 }
 
-function javaLineHtml(code) {
+function explainKeysAttr(keys) {
+  return keys && keys.length ? ` data-explain-keys="${escapeAttr(keys.join(" "))}"` : "";
+}
+
+function javaLineHtml(code, keys) {
+  const attr = explainKeysAttr(keys);
   if (code === "") {
-    return `<span class="java-line is-blank">\u00a0</span>`;
+    return `<span class="java-line is-blank"${attr}>\u00a0</span>`;
   }
-  return `<span class="java-line">${highlightJava(code)}</span>`;
+  return `<span class="java-line"${attr}>${highlightJava(code)}</span>`;
+}
+
+function setSearchFoldOpen(fold, open) {
+  const id = fold.dataset.fold;
+  if (open) {
+    searchFoldOpen.add(id);
+  } else {
+    searchFoldOpen.delete(id);
+  }
+  fold.classList.toggle("is-open", open);
+  fold.querySelector(".java-fold-body").hidden = !open;
+  const button = fold.querySelector(".java-fold-toggle");
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  button.setAttribute("aria-label", open ? "Collapse" : "Expand");
+  button.querySelector("i").className = `fa-regular ${open ? "fa-square-minus" : "fa-square-plus"}`;
 }
 
 function setSearchSnippet(q, tokens, genre, minus, explainDoc) {
@@ -935,28 +982,66 @@ function setSearchSnippet(q, tokens, genre, minus, explainDoc) {
       const open = searchFoldOpen.has(block.id);
       const icon = open ? "fa-square-minus" : "fa-square-plus";
       const label = open ? "Collapse" : "Expand";
-      return `<div class="java-fold${open ? " is-open" : ""}" data-fold="${escapeAttr(block.id)}"><div class="java-fold-bar"><button type="button" class="java-fold-toggle" aria-expanded="${open}" aria-label="${label}"><i class="fa-regular ${icon}" aria-hidden="true"></i></button>${javaLineHtml(block.summary)}</div><div class="java-fold-body"${open ? "" : " hidden"}>${block.body.map(javaLineHtml).join("")}</div></div>`;
+      const body = block.body.map((line) => javaLineHtml(line.code, line.keys)).join("");
+      return `<div class="java-fold${open ? " is-open" : ""}" data-fold="${escapeAttr(block.id)}"${explainKeysAttr(block.keys)}><div class="java-fold-bar"><button type="button" class="java-fold-toggle" aria-expanded="${open}" aria-label="${label}"><i class="fa-regular ${icon}" aria-hidden="true"></i></button>${javaLineHtml(block.summary, block.keys)}</div><div class="java-fold-body"${open ? "" : " hidden"}>${body}</div></div>`;
     }
-    return javaLineHtml(block.code);
+    return javaLineHtml(block.code, block.keys);
   }).join("");
   document.getElementById("snippet").innerHTML = html;
   document.querySelectorAll("#snippet .java-fold-toggle").forEach((button) => {
     button.onclick = () => {
       const fold = button.closest(".java-fold");
-      const id = fold.dataset.fold;
-      const open = !searchFoldOpen.has(id);
-      if (open) {
-        searchFoldOpen.add(id);
-      } else {
-        searchFoldOpen.delete(id);
-      }
-      fold.classList.toggle("is-open", open);
-      fold.querySelector(".java-fold-body").hidden = !open;
-      button.setAttribute("aria-expanded", open ? "true" : "false");
-      button.setAttribute("aria-label", open ? "Collapse" : "Expand");
-      button.querySelector("i").className = `fa-regular ${open ? "fa-square-minus" : "fa-square-plus"}`;
+      setSearchFoldOpen(fold, !searchFoldOpen.has(fold.dataset.fold));
     };
   });
+}
+
+function parseExplainKeys(value) {
+  return (value || "").split(/\s+/).filter(Boolean);
+}
+
+function bindExplainHover() {
+  bindExplainHoverZone(document.getElementById("snippet"), "snippet");
+  bindExplainHoverZone(document.getElementById("readout"), "readout");
+}
+
+function bindExplainHoverZone(zone, origin) {
+  if (!zone) return;
+  zone.onpointerover = (event) => {
+    const host = event.target.closest("[data-explain-keys]");
+    setExplainHover(host && zone.contains(host) ? parseExplainKeys(host.dataset.explainKeys) : [], origin);
+  };
+  zone.onpointerleave = () => setExplainHover([]);
+}
+
+function setExplainHover(keys, origin) {
+  const wanted = new Set(keys);
+  document.querySelectorAll("#snippet [data-explain-keys], #readout [data-explain-keys]").forEach((el) => {
+    const have = parseExplainKeys(el.dataset.explainKeys);
+    el.classList.toggle("is-on", wanted.size > 0 && have.some((key) => wanted.has(key)));
+  });
+  if (!wanted.size) return;
+  if (origin !== "snippet") {
+    const lines = [...document.querySelectorAll("#snippet .java-line.is-on")];
+    lines.forEach((line) => {
+      const fold = line.closest(".java-fold");
+      if (fold && line.closest(".java-fold-body")) {
+        setSearchFoldOpen(fold, true);
+      }
+    });
+    scrollIntoPanel(document.getElementById("snippet")?.closest(".panel"), lines[0], lines.at(-1));
+  }
+  if (origin !== "readout") {
+    const lines = [...document.querySelectorAll("#readout .explain-line.is-on")];
+    scrollIntoPanel(document.getElementById("readout"), lines[0], lines.at(-1));
+  }
+}
+
+function explainTreeHtml(node, depth = 0) {
+  if (!node) return "";
+  const kids = (node.details || []).map((child) => explainTreeHtml(child, depth + 1)).join("");
+  const value = node.value == null ? "" : String(node.value);
+  return `<div class="explain-line"${explainKeysAttr(node.keys)} style="--depth:${depth}"><span class="explain-value">${escapeHtml(value)}</span> = ${escapeHtml(node.description)}</div>${kids}`;
 }
 
 function setSnippet(source) {
@@ -983,7 +1068,12 @@ async function runSearch(explainDoc) {
   });
   setSearchSnippet(q, data.tokens, genre, minus, explainDoc);
   setCues(data.tokens);
-  const explained = data.hits.find((hit) => hit.explain);
+  const explained = data.hits.find((hit) => hit.explainTree || hit.explain);
+  const explainHtml = explained?.explainTree
+      ? `<h3>Explanation · doc ${explained.luceneDoc}</h3><div class="explain">${explainTreeHtml(explained.explainTree)}</div>`
+      : explained?.explain
+          ? `<h3>Explanation · doc ${explained.luceneDoc}</h3><pre class="explain">${escapeHtml(explained.explain)}</pre>`
+          : "";
   readout(`
     <h3>${data.total} hits</h3>
     <p>${escapeHtml(data.query)}</p>
@@ -994,10 +1084,11 @@ async function runSearch(explainDoc) {
           <span class="muted"> · ${escapeHtml(hit.genre || "—")} · ${escapeHtml(hit.key || "—")}</span>
         </span>
       </div>`).join("") || `<p class="muted">no hits</p>`}
-    ${explained ? `<h3>Explanation · doc ${explained.luceneDoc}</h3><pre class="explain">${escapeHtml(explained.explain)}</pre>` : ""}`);
+    ${explainHtml}`);
   document.querySelectorAll(".hit[data-doc]").forEach((row) => {
     row.onclick = () => runSearch(Number(row.dataset.doc));
   });
+  bindExplainHover();
 }
 
 async function runSuggest() {

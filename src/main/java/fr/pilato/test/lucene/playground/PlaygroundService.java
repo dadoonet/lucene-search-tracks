@@ -31,6 +31,7 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
@@ -244,6 +245,7 @@ public final class PlaygroundService implements AutoCloseable {
         Map<String, List<String>> mustNots = request == null || request.mustNots() == null
                 ? Map.of() : request.mustNots();
         Query lucene = TrackLuceneQueryBuilder.buildStructured(q, filters, mustNots);
+        List<String> tokens = TrackAnalyzers.tokenize(q);
         IndexSearcher searcher = index.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             TopDocs top = searcher.search(lucene, TOP_HITS);
@@ -261,46 +263,46 @@ public final class PlaygroundService implements AutoCloseable {
                 if (track == null) {
                     continue;
                 }
-                String explain = null;
+                Explanation expl = null;
                 if (explainDoc != null && explainDoc == hit.doc) {
-                    explain = searcher.explain(lucene, hit.doc).toString();
+                    expl = searcher.explain(lucene, hit.doc);
                 }
-                hits.add(new SearchHitView(
-                        hit.doc,
-                        track.id(),
-                        track.title(),
-                        track.artist(),
-                        track.genre(),
-                        track.key(),
-                        track.bpm(),
-                        track.rating(),
-                        track.year(),
-                        hit.score,
-                        explain));
+                hits.add(searchHit(hit.doc, track, hit.score, expl, tokens));
             }
             if (explainDoc == null && !hits.isEmpty()) {
                 SearchHitView first = hits.getFirst();
-                String explain = searcher.explain(lucene, first.luceneDoc()).toString();
-                hits.set(0, new SearchHitView(
+                Explanation expl = searcher.explain(lucene, first.luceneDoc());
+                hits.set(0, searchHit(
                         first.luceneDoc(),
-                        first.id(),
-                        first.title(),
-                        first.artist(),
-                        first.genre(),
-                        first.key(),
-                        first.bpm(),
-                        first.rating(),
-                        first.year(),
+                        byId.get(first.id()),
                         first.score(),
-                        explain));
+                        expl,
+                        tokens));
             }
             return new SearchResponse(
                     q,
-                    TrackAnalyzers.tokenize(q),
+                    tokens,
                     lucene.toString(),
                     total,
                     List.copyOf(hits));
         }
+    }
+
+    private static SearchHitView searchHit(
+            int luceneDoc, Track track, float score, Explanation expl, List<String> tokens) {
+        return new SearchHitView(
+                luceneDoc,
+                track.id(),
+                track.title(),
+                track.artist(),
+                track.genre(),
+                track.key(),
+                track.bpm(),
+                track.rating(),
+                track.year(),
+                score,
+                expl == null ? null : expl.toString(),
+                expl == null ? null : PlaygroundExplain.from(expl, tokens));
     }
 
     public SuggestResponse suggest(String prefix) throws IOException {

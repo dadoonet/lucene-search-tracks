@@ -58,6 +58,12 @@ public final class PlaygroundModels {
             long docFreq,
             List<TermPosting> postings) {}
 
+    public record ExplainNode(
+            double value,
+            String description,
+            List<String> keys,
+            List<ExplainNode> details) {}
+
     public record SearchHitView(
             int luceneDoc,
             String id,
@@ -69,7 +75,8 @@ public final class PlaygroundModels {
             int rating,
             int year,
             float score,
-            String explain) {}
+            String explain,
+            ExplainNode explainTree) {}
 
     public record SearchResponse(
             String q,
