@@ -1,5 +1,8 @@
 package fr.pilato.test.lucene;
 
+import org.apache.lucene.document.DoubleField;
+import org.apache.lucene.document.IntField;
+import org.apache.lucene.facet.range.DoubleRange;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause;
@@ -179,16 +182,55 @@ public final class TrackLuceneQueryBuilder {
     }
 
     private static Query fieldQuery(String field, String value) {
-        String luceneField = switch (field) {
-            case "title" -> TrackDocumentMapper.TITLE_RAW_NORMALIZED;
-            case "artist" -> TrackDocumentMapper.ARTIST_RAW_NORMALIZED;
-            case "genre" -> TrackDocumentMapper.GENRE_RAW_NORMALIZED;
-            case "key" -> TrackDocumentMapper.KEY_CODE;
+        return switch (field) {
+            case "title" -> keyword(TrackDocumentMapper.TITLE_RAW_NORMALIZED, value);
+            case "artist" -> keyword(TrackDocumentMapper.ARTIST_RAW_NORMALIZED, value);
+            case "genre" -> keyword(TrackDocumentMapper.GENRE_RAW_NORMALIZED, value);
+            case "key" -> keyword(TrackDocumentMapper.KEY_CODE, value);
+            case "bpm" -> bpmRange(value);
+            case "rating" -> ratingExact(value);
+            case "year" -> yearDecade(value);
             default -> null;
         };
-        if (luceneField == null) {
+    }
+
+    private static Query keyword(String luceneField, String value) {
+        return new TermQuery(new Term(luceneField, TrackDocumentMapper.normalize(value)));
+    }
+
+    /** Facet buckets are half-open: {@code 120 – 130} is {@code [120, 130)}. */
+    private static Query bpmRange(String label) {
+        for (DoubleRange range : TrackFacets.bpmRanges()) {
+            if (range.label.equals(label)) {
+                double max = Double.isInfinite(range.max)
+                        ? Double.POSITIVE_INFINITY
+                        : Math.nextDown(range.max);
+                return DoubleField.newRangeQuery(TrackDocumentMapper.BPM, range.min, max);
+            }
+        }
+        return null;
+    }
+
+    private static Query ratingExact(String label) {
+        try {
+            return IntField.newExactQuery(TrackDocumentMapper.RATING, Integer.parseInt(label.trim()));
+        } catch (NumberFormatException e) {
             return null;
         }
-        return new TermQuery(new Term(luceneField, TrackDocumentMapper.normalize(value)));
+    }
+
+    /** Playground decade labels look like {@code 2020–2029} (en dash). */
+    private static Query yearDecade(String label) {
+        String[] parts = label.split("–", 2);
+        if (parts.length != 2) {
+            return null;
+        }
+        try {
+            int from = Integer.parseInt(parts[0].trim());
+            int to = Integer.parseInt(parts[1].trim());
+            return IntField.newRangeQuery(TrackDocumentMapper.YEAR, from, to);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

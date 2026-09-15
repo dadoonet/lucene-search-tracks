@@ -315,17 +315,34 @@ public final class PlaygroundService implements AutoCloseable {
     }
 
     public FacetsResponse facets(String q, String drillGenre) throws IOException {
+        Map<String, List<String>> filters = drillGenre == null || drillGenre.isBlank()
+                ? Map.of()
+                : Map.of("genre", List.of(drillGenre));
+        return facets(q, filters, Map.of());
+    }
+
+    public FacetsResponse facets(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
+            throws IOException {
         String queryText = q == null ? "" : q;
-        String drill = drillGenre == null || drillGenre.isBlank() ? "" : drillGenre;
-        Query base = TrackLuceneQueryBuilder.buildStructured(queryText, Map.of(), Map.of());
+        Map<String, List<String>> include = filters == null ? Map.of() : filters;
+        Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
+        List<String> genres = include.getOrDefault("genre", List.of()).stream()
+                .filter(value -> value != null && !value.isBlank())
+                .toList();
+        Map<String, List<String>> withoutGenre = new LinkedHashMap<>(include);
+        withoutGenre.remove("genre");
+        Query base = TrackLuceneQueryBuilder.buildStructured(queryText, withoutGenre, exclude);
         IndexSearcher searcher = index.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             var state = new DefaultSortedSetDocValuesReaderState(reader, TrackFacets.config());
             Facets facets;
-            boolean sideways = !drill.isEmpty();
+            boolean sideways = !genres.isEmpty();
             if (sideways) {
                 DrillDownQuery drillDown = new DrillDownQuery(TrackFacets.config(), base);
-                drillDown.add(TrackFacets.GENRE, new TermQuery(new Term(TrackDocumentMapper.GENRE_RAW, drill)));
+                for (String genre : genres) {
+                    drillDown.add(TrackFacets.GENRE, new TermQuery(new Term(TrackDocumentMapper.GENRE_RAW, genre)));
+                }
                 facets = new PlaygroundDrillSideways(searcher, state).search(drillDown, 1).facets;
             } else {
                 FacetsCollector collector = FacetsCollectorManager.search(
@@ -337,7 +354,7 @@ public final class PlaygroundService implements AutoCloseable {
                     queryText,
                     base.toString(),
                     sideways,
-                    drill,
+                    String.join(", ", genres),
                     List.of(
                             dim("genre", "🏷️", children(facets.getAllChildren(TrackFacets.GENRE), 12)),
                             dim("bpm", "⏱", children(facets.getAllChildren(TrackDocumentMapper.BPM), 16)),

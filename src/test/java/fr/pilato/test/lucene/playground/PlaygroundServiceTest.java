@@ -241,6 +241,29 @@ class PlaygroundServiceTest {
     }
 
     @Test
+    void facets_filtersMapGenre_isDrillSideways() throws Exception {
+        var drilled = service.facets("Bob", Map.of("genre", List.of("Club")), Map.of());
+        assertThat(drilled.drillSideways()).isTrue();
+        assertThat(count(drilled, "genre", "Dance")).isGreaterThan(0);
+        assertThat(count(drilled, "bpm", "120 – 130")).isLessThan(52);
+    }
+
+    @Test
+    void facets_bpmFilter_narrowsOtherBpmBuckets() throws Exception {
+        var filtered = service.facets("Bob", Map.of("bpm", List.of("120 – 130")), Map.of());
+        assertThat(filtered.drillSideways()).isFalse();
+        assertThat(count(filtered, "bpm", "120 – 130")).isEqualTo(52);
+        assertThat(count(filtered, "bpm", "80 – 90")).isZero();
+    }
+
+    @Test
+    void facets_mustNotGenre_hidesClubBucket() throws Exception {
+        var excluded = service.facets("Bob", Map.of(), Map.of("genre", List.of("Club")));
+        assertThat(count(excluded, "genre", "Club")).isZero();
+        assertThat(count(excluded, "genre", "Dance")).isGreaterThan(0);
+    }
+
+    @Test
     void facets_showsFacetsConfigRewrite() throws Exception {
         var rewrite = service.facets("Bob", "").rewrite();
         assertThat(rewrite.before())

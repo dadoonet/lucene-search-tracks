@@ -7,6 +7,7 @@ import org.apache.lucene.util.Version;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -73,7 +74,8 @@ public final class PlaygroundApp {
                 FacetsRequest body = ctx.bodyAsClass(FacetsRequest.class);
                 ctx.json(service.facets(
                         body == null ? "" : body.q(),
-                        body == null ? "" : body.drillGenre()));
+                        facetFilters(body),
+                        body == null || body.mustNots() == null ? Map.of() : body.mustNots()));
             });
         });
     }
@@ -90,6 +92,19 @@ public final class PlaygroundApp {
             doc = Integer.parseInt(explainDoc);
         }
         return new SearchRequest(q == null ? "" : q, filters, mustNots, doc);
+    }
+
+    private static Map<String, List<String>> facetFilters(FacetsRequest body) {
+        if (body == null) {
+            return Map.of();
+        }
+        Map<String, List<String>> filters = body.filters() == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(body.filters());
+        if (body.drillGenre() != null && !body.drillGenre().isBlank()) {
+            filters.put("genre", List.of(body.drillGenre()));
+        }
+        return filters;
     }
 
     private static String indexHtml() throws IOException {

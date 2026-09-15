@@ -117,7 +117,11 @@ public final class PlaygroundModels {
 
     public record SuggestRequest(String prefix) {}
 
-    public record FacetsRequest(String q, String drillGenre) {}
+    public record FacetsRequest(
+            String q,
+            String drillGenre,
+            Map<String, List<String>> filters,
+            Map<String, List<String>> mustNots) {}
 
     public record MetaResponse(int numDocs, String directory, String heapSize, long builtInMs) {}
 }

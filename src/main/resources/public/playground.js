@@ -250,6 +250,47 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
       ["fq", "drill"].forEach((id) => bindText(id, () => runFacets()));
       runFacets();
     }
+  },
+  demo: {
+    kicker: "All together",
+    title: "Demo",
+    lede: "Type to search. A genre or artist suggestion pins a chip; a title fills the bar. Click a chip to flip filter in / filter out.",
+    snippet: `Query q = TrackLuceneQueryBuilder.buildStructured(text, filters, mustNots);
+TopDocs hits = searcher.search(q, 25);
+new DrillSideways(searcher, config, state).search(drillDown, 1);`,
+    render(root) {
+      demoState = { chips: [], suggest: [], open: false, gen: 0 };
+      root.innerHTML = `
+        <div class="demo">
+          <div class="demo-search">
+            <label class="demo-q-shell">
+              <span class="demo-q-kicker">Search</span>
+              <span class="demo-q-row">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input id="demo-q" type="search" value="" autocomplete="off" spellcheck="false" placeholder="title, artist, genre…">
+              </span>
+            </label>
+            <ul id="demo-suggest" class="demo-suggest" hidden></ul>
+          </div>
+          <div id="demo-chips" class="demo-chips" aria-live="polite"></div>
+          <div class="demo-split">
+            <aside id="demo-facets" class="demo-facets" aria-label="Facets"></aside>
+            <div class="demo-results">
+              <p class="demo-total" id="demo-total"></p>
+              <div class="demo-table-wrap">
+                <table class="demo-table">
+                  <thead>
+                    <tr><th>Title</th><th>Artist</th><th>Genre</th></tr>
+                  </thead>
+                  <tbody id="demo-hits"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      bindDemo();
+      runDemo();
+    }
   }
 };
 
@@ -1189,6 +1230,281 @@ function facetsSnippet(rewrite) {
   return lines.join("\n");
 }
 
+let demoState = { chips: [], suggest: [], open: false, gen: 0 };
+
+function demoClauses() {
+  const filters = {};
+  const mustNots = {};
+  for (const chip of demoState.chips) {
+    const target = chip.mode === "out" ? mustNots : filters;
+    (target[chip.dim] ||= []).push(chip.value);
+  }
+  return { filters, mustNots };
+}
+
+function demoChipIndex(dim, value) {
+  return demoState.chips.findIndex((chip) => chip.dim === dim && chip.value === value);
+}
+
+function addDemoChip(dim, value) {
+  if (demoChipIndex(dim, value) >= 0) {
+    return;
+  }
+  demoState.chips.push({ dim, value, mode: "in" });
+}
+
+function toggleDemoChip(dim, value) {
+  const index = demoChipIndex(dim, value);
+  if (index < 0) {
+    return;
+  }
+  const chip = demoState.chips[index];
+  chip.mode = chip.mode === "in" ? "out" : "in";
+}
+
+function removeDemoChip(dim, value) {
+  demoState.chips = demoState.chips.filter((chip) => !(chip.dim === dim && chip.value === value));
+}
+
+function suggestType(field) {
+  return field === "title" ? "track" : field;
+}
+
+function suggestIcon(field) {
+  switch (suggestType(field)) {
+    case "genre": return "fa-tag";
+    case "artist": return "fa-circle-user";
+    default: return "fa-music";
+  }
+}
+
+function bindDemo() {
+  const input = document.getElementById("demo-q");
+  const box = document.getElementById("demo-suggest");
+  let timer;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      runDemoSuggest();
+      runDemo();
+    }, 160);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideDemoSuggest();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      hideDemoSuggest();
+      runDemo();
+    }
+  });
+  input.addEventListener("blur", () => {
+    setTimeout(hideDemoSuggest, 120);
+  });
+  box.addEventListener("mousedown", (event) => event.preventDefault());
+  box.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-suggest-text]");
+    if (!row) {
+      return;
+    }
+    pickDemoSuggestion(row.dataset.suggestField, row.dataset.suggestText);
+  });
+  document.getElementById("demo-chips").addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-chip-remove]");
+    const chip = event.target.closest("[data-chip-dim]");
+    if (remove && chip) {
+      event.preventDefault();
+      removeDemoChip(chip.dataset.chipDim, chip.dataset.chipValue);
+      renderDemoChips();
+      runDemo();
+      return;
+    }
+    if (chip) {
+      toggleDemoChip(chip.dataset.chipDim, chip.dataset.chipValue);
+      renderDemoChips();
+      runDemo();
+    }
+  });
+  document.getElementById("demo-facets").addEventListener("click", (event) => {
+    const bucket = event.target.closest("[data-facet-dim]");
+    if (!bucket) {
+      return;
+    }
+    addDemoChip(bucket.dataset.facetDim, bucket.dataset.facetValue);
+    renderDemoChips();
+    runDemo();
+  });
+}
+
+function pickDemoSuggestion(field, text) {
+  if (field === "genre" || field === "artist") {
+    addDemoChip(field, text);
+    document.getElementById("demo-q").value = "";
+  } else {
+    document.getElementById("demo-q").value = text;
+  }
+  hideDemoSuggest();
+  renderDemoChips();
+  runDemo();
+}
+
+function hideDemoSuggest() {
+  demoState.open = false;
+  demoState.suggest = [];
+  const box = document.getElementById("demo-suggest");
+  if (box) {
+    box.hidden = true;
+    box.innerHTML = "";
+  }
+  document.querySelector(".demo-search")?.classList.remove("is-open");
+}
+
+async function runDemoSuggest() {
+  const input = document.getElementById("demo-q");
+  const box = document.getElementById("demo-suggest");
+  if (!input || !box) {
+    return;
+  }
+  const prefix = input.value.trim();
+  if (!prefix) {
+    hideDemoSuggest();
+    return;
+  }
+  const data = await getJson("/api/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix })
+  });
+  if (document.getElementById("demo-q")?.value.trim() !== prefix) {
+    return;
+  }
+  demoState.suggest = data.hits || [];
+  demoState.open = demoState.suggest.length > 0;
+  box.hidden = !demoState.open;
+  input.closest(".demo-search")?.classList.toggle("is-open", demoState.open);
+  box.innerHTML = demoState.suggest.map((hit) => {
+    const kind = suggestType(hit.field);
+    return `
+    <li>
+      <button type="button" class="demo-suggest-hit" data-suggest-field="${escapeAttr(hit.field)}" data-suggest-text="${escapeAttr(hit.text)}">
+        <i class="fa-solid ${suggestIcon(hit.field)}" aria-hidden="true"></i>
+        <span class="demo-suggest-text">${safeHighlight(hit.highlight)}</span>
+        <span class="demo-suggest-type">${escapeHtml(kind)}</span>
+      </button>
+    </li>`;
+  }).join("");
+}
+
+function renderDemoChips() {
+  const host = document.getElementById("demo-chips");
+  if (!host) {
+    return;
+  }
+  if (!demoState.chips.length) {
+    host.innerHTML = "";
+    return;
+  }
+  host.innerHTML = demoState.chips.map((chip) => {
+    const mode = chip.mode === "out" ? "filter out" : "filter in";
+    return `
+      <button type="button" class="demo-chip is-${chip.mode}" data-chip-dim="${escapeAttr(chip.dim)}" data-chip-value="${escapeAttr(chip.value)}" aria-label="${escapeAttr(chip.dim + ": " + chip.value + ", " + mode + ". Click to invert.")}">
+        <span class="demo-chip-mode">${chip.mode === "out" ? "−" : "+"}</span>
+        <span class="demo-chip-dim">${escapeHtml(chip.dim)}</span>
+        <span class="demo-chip-value">${escapeHtml(chip.value)}</span>
+        <span class="demo-chip-remove" data-chip-remove="1" aria-label="Remove filter">×</span>
+      </button>`;
+  }).join("");
+}
+
+async function runDemo() {
+  const input = document.getElementById("demo-q");
+  if (!input) {
+    return;
+  }
+  const q = input.value;
+  const { filters, mustNots } = demoClauses();
+  const gen = ++demoState.gen;
+  const [search, facets] = await Promise.all([
+    getJson("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q, filters, mustNots })
+    }),
+    getJson("/api/facets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q, filters, mustNots, drillGenre: "" })
+    })
+  ]);
+  if (gen !== demoState.gen) {
+    return;
+  }
+  renderDemoChips();
+  renderDemoFacets(facets.dims || []);
+  renderDemoHits(search);
+  setDemoReadout(search, facets);
+  setCues(search.tokens || []);
+  const collector = facets.drillSideways
+      ? "new DrillSideways(searcher, config, state).search(drillDown, 1);"
+      : "FacetsCollectorManager.search(searcher, q, 1, manager).facetsCollector();";
+  setSnippet([
+    "Query q = TrackLuceneQueryBuilder.buildStructured(",
+    "        " + javaString(q) + ", filters, mustNots);",
+    "// " + search.query,
+    "TopDocs hits = searcher.search(q, 25);",
+    collector
+  ].join("\n"));
+}
+
+function renderDemoFacets(dims) {
+  const host = document.getElementById("demo-facets");
+  if (!host) {
+    return;
+  }
+  host.innerHTML = dims.map((dim) => `
+    <section>
+      <h3>${dim.emoji} ${escapeHtml(dim.name)}</h3>
+      ${(dim.buckets || []).map((bucket) => {
+        const index = demoChipIndex(dim.name, bucket.label);
+        const mode = index < 0 ? "" : demoState.chips[index].mode;
+        return `
+        <button type="button" class="demo-bucket${mode ? ` is-${mode}` : ""}" data-facet-dim="${escapeAttr(dim.name)}" data-facet-value="${escapeAttr(bucket.label)}">
+          <span>${escapeHtml(bucket.label)}</span>
+          <span>${bucket.count}</span>
+        </button>`;
+      }).join("")}
+    </section>`).join("");
+}
+
+function renderDemoHits(search) {
+  const total = document.getElementById("demo-total");
+  const body = document.getElementById("demo-hits");
+  if (!total || !body) {
+    return;
+  }
+  const hits = search.hits || [];
+  total.textContent = hits.length
+      ? `${search.total} hits · showing ${hits.length}`
+      : "no hits";
+  body.innerHTML = hits.map((hit) => `
+    <tr>
+      <td>${escapeHtml(hit.title)}</td>
+      <td>${escapeHtml(hit.artist)}</td>
+      <td>${escapeHtml(hit.genre || "—")}</td>
+    </tr>`).join("");
+}
+
+function setDemoReadout(search, facets) {
+  readout(`
+    <h3>${search.total} hits</h3>
+    <p class="muted">${facets.drillSideways ? "DrillSideways" : "FacetsCollector"}</p>
+    <pre class="demo-query">${escapeHtml(search.query)}</pre>
+    <h3>tokens</h3>
+    <p>${(search.tokens || []).map((token) => `<span class="idx-chip">${escapeHtml(token)}</span>`).join(" ") || `<span class="muted">match-all</span>`}</p>`);
+}
+
 function show(name) {
   const chapter = chapters[name];
   document.getElementById("snippet-kicker").textContent = chapter.kicker;
@@ -1200,6 +1516,7 @@ function show(name) {
   });
   document.querySelector(".mixer").classList.toggle("is-analyze", name === "analyze");
   document.querySelector(".mixer").classList.toggle("is-map", name === "map");
+  document.querySelector(".mixer").classList.toggle("is-demo", name === "demo");
   chapter.render(document.getElementById("controls"));
 }
 

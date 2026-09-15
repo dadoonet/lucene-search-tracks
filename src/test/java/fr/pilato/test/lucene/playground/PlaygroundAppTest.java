@@ -57,6 +57,8 @@ class PlaygroundAppTest {
             assertThat(response.body().string())
                     .contains("Lucene playground")
                     .contains("lang=\"en\"")
+                    .contains("7 Demo")
+                    .contains("data-chapter=\"demo\"")
                     .contains("Built on Lucene " + Version.LATEST)
                     .contains("href=\"https://david.pilato.fr/\">David Pilato</a>");
         });
@@ -84,6 +86,22 @@ class PlaygroundAppTest {
             assertThat(response.body().string())
                     .contains("bindExplainHover")
                     .contains("data-explain-keys");
+        });
+    }
+
+    @Test
+    void playgroundJs_demoWiresSearchFacetsAndChips() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/playground.js");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains("toggleDemoChip")
+                    .contains("demo-suggest")
+                    .contains("/api/facets")
+                    .contains("mustNots")
+                    .contains("fa-music")
+                    .contains("fa-tag")
+                    .contains("fa-circle-user");
         });
     }
 }

@@ -75,6 +75,29 @@ class TrackSearchTest {
         assertThat(printed).contains("#").contains("-");
     }
 
+    @Test
+    void bobBpm120to130_matchesFacetCount() throws Exception {
+        assertThat(search("Bob", Map.of("bpm", List.of("120 – 130")), Map.of())).hasSize(52);
+    }
+
+    @Test
+    void bobRating5_matchesFacetCount() throws Exception {
+        assertThat(search("Bob", Map.of("rating", List.of("5")), Map.of())).hasSize(13);
+    }
+
+    @Test
+    void bobYear2020s_matchesFacetCount() throws Exception {
+        assertThat(search("Bob", Map.of("year", List.of("2020–2029")), Map.of())).hasSize(15);
+    }
+
+    @Test
+    void bobExcludeClub_dropsClubHits() throws Exception {
+        List<Track> hits = search("Bob", Map.of(), Map.of("genre", List.of("Club")));
+        assertThat(hits).isNotEmpty();
+        assertThat(hits).allSatisfy(track -> assertThat(track.genre()).isNotEqualTo("Club"));
+        assertThat(hits).hasSizeLessThan(62);
+    }
+
     private static List<Track> search(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws Exception {
