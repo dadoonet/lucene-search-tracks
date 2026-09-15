@@ -227,10 +227,17 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
   suggest: {
     kicker: "Part 6 · AnalyzingInfixSuggester",
     title: "Suggest",
-    lede: "The payload says whether the suggestion is a title, artist, or genre. A genre chip becomes a FILTER, not free text.",
-    snippet: `suggester.lookup("club", Set.of(), 10, false, true);
-// payload = "genre" | "title" | "artist"
-Query chip = new TermQuery(new Term("genre.raw.normalized", "club house"));`,
+    lede: "A second RAM directory holds the suggester. Hover a row to see lookup() become that LookupResult — highlightKey, field, and the FILTER chip.",
+    snippet: `Directory suggestionDirectory = new ByteBuffersDirectory();
+AnalyzingInfixSuggester suggester = new AnalyzingInfixSuggester(
+        suggestionDirectory, analyzer);
+suggester.build(new TrackSuggestionInputIterator(tracks.values()));
+List<Lookup.LookupResult> matches =
+        suggester.lookup("club", Set.of(), 10, true, true);
+Lookup.LookupResult match = matches.get(0);
+String text = match.key.toString();
+String field = match.payload.utf8ToString();
+String highlight = match.highlightKey.toString();`,
     render(root) {
       root.innerHTML = `
         <div class="controls">
@@ -1199,6 +1206,8 @@ async function runSearch(explainDoc) {
   bindExplainHover();
 }
 
+let suggestState = { prefix: "club", hits: [], index: 0 };
+
 async function runSuggest() {
   const prefix = document.getElementById("prefix").value;
   const data = await getJson("/api/suggest", {
@@ -1206,14 +1215,167 @@ async function runSuggest() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prefix })
   });
+  suggestState = { prefix, hits: data.hits || [], index: 0 };
   setCues([prefix]);
+  renderSuggest();
+}
+
+function suggestSnippetLines() {
+  const prefix = suggestState.prefix ?? "";
+  const hit = suggestState.hits[suggestState.index];
+  const index = hit ? suggestState.index : 0;
+  const lines = [
+    { code: "// Same analyzer as page 1. Second RAM directory, not the inverted index." },
+    { code: "Directory suggestionDirectory = new ByteBuffersDirectory();", part: "ctor" },
+    { code: "AnalyzingInfixSuggester suggester = new AnalyzingInfixSuggester(", part: "ctor" },
+    { code: "        suggestionDirectory, analyzer);", part: "ctor" },
+    { code: "" },
+    { code: "suggester.build(new TrackSuggestionInputIterator(tracks.values()));", part: "build" },
+    { code: "" },
+    { code: "List<Lookup.LookupResult> matches =", part: "lookup" },
+    { code: `        suggester.lookup(${javaString(prefix)}, Set.of(), 10, true, true);`, part: "lookup" }
+  ];
+  if (!hit) {
+    return lines;
+  }
+  lines.push({ code: "" });
+  lines.push({ code: `Lookup.LookupResult match = matches.get(${index});`, part: "lookup" });
+  lines.push({ code: `String text = match.key.toString(); // ${javaString(hit.text)}`, part: "key" });
+  lines.push({ code: `String field = match.payload.utf8ToString(); // ${javaString(hit.field)}`, part: "payload" });
+  lines.push({ code: "String highlight = match.highlightKey.toString();", part: "highlight" });
+  lines.push({ code: `// ${javaString(hit.highlight)}`, part: "highlight" });
+  if (hit.field === "genre") {
+    lines.push({
+      code: `// genre chip → FILTER TermQuery(genre.raw.normalized, ${javaString(luceneNormalize(hit.text))})`,
+      part: "payload"
+    });
+  } else {
+    lines.push({
+      code: `// ${hit.field} chip → free text, not a FILTER`,
+      part: "payload"
+    });
+  }
+  return lines;
+}
+
+function setSuggestSnippet() {
+  const html = suggestSnippetLines().map((line) => {
+    if (line.code === "") {
+      return javaLineHtml("");
+    }
+    const part = line.part ? ` data-suggest-part="${escapeAttr(line.part)}"` : "";
+    return `<span class="java-line"${part}>${highlightJava(line.code)}</span>`;
+  }).join("");
+  document.getElementById("snippet").innerHTML = html;
+}
+
+function renderSuggest() {
+  const prefix = suggestState.prefix ?? "";
+  const hits = suggestState.hits;
+  const lookupCall = `suggester.lookup(${javaString(prefix)}, Set.of(), 10, true, true)`;
+  const rows = hits.map((hit, i) => `
+      <div class="suggest-hit" data-suggest-index="${i}" data-suggest-part="row">
+        <span class="muted" data-suggest-part="lookup">matches.get(${i})</span>
+        <span data-suggest-part="highlight">${safeHighlight(hit.highlight)}</span>
+        <span data-suggest-part="payload">${escapeHtml(hit.field)}</span>
+      </div>`).join("");
+  setSuggestSnippet();
   readout(`
-    <h3>${data.hits.length} suggestions</h3>
-    ${(data.hits || []).map((hit) => `
-      <div class="bucket">
-        <span>${safeHighlight(hit.highlight)}</span>
-        <span class="muted">${escapeHtml(hit.field)}</span>
-      </div>`).join("") || `<p class="muted">nothing in the dictionary</p>`}`);
+    <div class="suggest-step" data-suggest-part="ctor">
+      <span class="muted">new</span>
+      AnalyzingInfixSuggester(new ByteBuffersDirectory(), analyzer)
+    </div>
+    <div class="suggest-step" data-suggest-part="build">
+      <span class="muted">build</span>
+      InputIterator · next()=text · payload()=field
+    </div>
+    <div class="bbl-down">↓</div>
+    <div class="suggest-step" data-suggest-part="lookup">
+      <span class="muted">lookup</span>
+      ${escapeHtml(lookupCall)}
+    </div>
+    <div class="bbl-down">↓</div>
+    <h3>List&lt;Lookup.LookupResult&gt; · ${hits.length}</h3>
+    ${hits.length ? `
+      <div class="suggest-head">
+        <span>match</span>
+        <span>highlightKey</span>
+        <span>field</span>
+      </div>
+      ${rows}` : `<p class="muted">nothing in the dictionary</p>`}`);
+  bindSuggestHover();
+  setSuggestHover(hits.length ? "lookup" : "ctor");
+}
+
+function bindSuggestHover() {
+  bindSuggestHoverZone(document.getElementById("snippet"), "snippet");
+  bindSuggestHoverZone(document.getElementById("readout"), "readout");
+}
+
+function bindSuggestHoverZone(zone, origin) {
+  if (!zone) return;
+  zone.onpointerover = (event) => {
+    const host = event.target.closest("[data-suggest-part]");
+    if (!host || !zone.contains(host)) {
+      setSuggestHover(null, origin);
+      return;
+    }
+    const hit = host.closest(".suggest-hit");
+    if (hit) {
+      const index = Number(hit.dataset.suggestIndex);
+      if (Number.isFinite(index) && index !== suggestState.index) {
+        suggestState.index = index;
+        setSuggestSnippet();
+      }
+    }
+    setSuggestHover(host.dataset.suggestPart, origin);
+  };
+  zone.onpointerleave = () => setSuggestHover(null);
+}
+
+function suggestLineActive(linePart, hoverPart) {
+  if (!hoverPart || !linePart) {
+    return false;
+  }
+  if (hoverPart === linePart) {
+    return true;
+  }
+  if (hoverPart === "row") {
+    return linePart === "lookup" || linePart === "key"
+        || linePart === "payload" || linePart === "highlight";
+  }
+  if (hoverPart === "highlight") {
+    return linePart === "highlight" || linePart === "key";
+  }
+  return false;
+}
+
+function setSuggestHover(part, origin) {
+  document.querySelectorAll("#snippet .java-line[data-suggest-part]").forEach((el) => {
+    el.classList.toggle("is-on", suggestLineActive(el.dataset.suggestPart, part));
+  });
+  document.querySelectorAll("#readout .suggest-step").forEach((el) => {
+    el.classList.toggle("is-on", Boolean(part) && el.dataset.suggestPart === part);
+  });
+  document.querySelectorAll("#readout .suggest-hit").forEach((el) => {
+    const hitPart = part === "row" || part === "key" || part === "payload"
+        || part === "highlight" || part === "lookup";
+    el.classList.toggle(
+        "is-on",
+        hitPart && Number(el.dataset.suggestIndex) === suggestState.index);
+  });
+  if (!part) {
+    return;
+  }
+  if (origin !== "snippet") {
+    const lines = [...document.querySelectorAll("#snippet .java-line.is-on")];
+    scrollIntoPanel(document.getElementById("snippet")?.closest(".panel"), lines[0], lines.at(-1));
+  }
+  if (origin !== "readout") {
+    const hit = document.querySelector("#readout .suggest-hit.is-on");
+    const step = document.querySelector("#readout .suggest-step.is-on");
+    scrollIntoPanel(document.getElementById("readout"), hit || step);
+  }
 }
 
 async function runHighlight() {
@@ -1637,6 +1799,8 @@ function setDemoReadout(search, facets) {
 }
 
 function show(name) {
+  const mixer = document.querySelector(".mixer");
+  const leavingDemo = mixer.classList.contains("is-demo") && name !== "demo";
   const chapter = chapters[name];
   document.getElementById("snippet-kicker").textContent = chapter.kicker;
   setSnippet(chapter.snippet);
@@ -1645,10 +1809,15 @@ function show(name) {
   document.querySelectorAll(".chapters button").forEach((button) => {
     button.classList.toggle("is-on", button.dataset.chapter === name);
   });
-  document.querySelector(".mixer").classList.toggle("is-analyze", name === "analyze");
-  document.querySelector(".mixer").classList.toggle("is-map", name === "map");
-  document.querySelector(".mixer").classList.toggle("is-demo", name === "demo");
+  mixer.classList.toggle("is-analyze", name === "analyze");
+  mixer.classList.toggle("is-map", name === "map");
+  mixer.classList.toggle("is-demo", name === "demo");
   chapter.render(document.getElementById("controls"));
+  if (name === "demo") {
+    setZoneZoom("deck");
+  } else if (leavingDemo) {
+    setZoneZoom("");
+  }
 }
 
 document.querySelectorAll(".chapters button").forEach((button) => {
@@ -1667,30 +1836,33 @@ show("analyze");
 bindColumnResize();
 bindZoneZoom();
 
-function bindZoneZoom() {
+function setZoneZoom(zone) {
   const mixer = document.querySelector(".mixer");
   const buttons = document.querySelectorAll(".zoom");
   const labels = { snippet: "Java", deck: "chapter", lcd: "Lucene playground" };
-
-  const apply = (zone) => {
-    mixer.classList.toggle("is-max-snippet", zone === "snippet");
-    mixer.classList.toggle("is-max-deck", zone === "deck");
-    mixer.classList.toggle("is-max-lcd", zone === "lcd");
-    mixer.dataset.max = zone || "";
-    buttons.forEach((button) => {
-      const on = zone === button.dataset.zone;
-      const icon = button.querySelector("i");
-      icon.classList.toggle("fa-expand", !on);
-      icon.classList.toggle("fa-compress", on);
-      button.setAttribute(
-          "aria-label",
-          `${on ? "Reduce" : "Maximize"} ${labels[button.dataset.zone]}`);
-    });
-  };
-
+  if (!mixer) {
+    return;
+  }
+  mixer.classList.toggle("is-max-snippet", zone === "snippet");
+  mixer.classList.toggle("is-max-deck", zone === "deck");
+  mixer.classList.toggle("is-max-lcd", zone === "lcd");
+  mixer.dataset.max = zone || "";
   buttons.forEach((button) => {
+    const on = zone === button.dataset.zone;
+    const icon = button.querySelector("i");
+    icon.classList.toggle("fa-expand", !on);
+    icon.classList.toggle("fa-compress", on);
+    button.setAttribute(
+        "aria-label",
+        `${on ? "Reduce" : "Maximize"} ${labels[button.dataset.zone]}`);
+  });
+}
+
+function bindZoneZoom() {
+  const mixer = document.querySelector(".mixer");
+  document.querySelectorAll(".zoom").forEach((button) => {
     button.onclick = () => {
-      apply(mixer.dataset.max === button.dataset.zone ? "" : button.dataset.zone);
+      setZoneZoom(mixer.dataset.max === button.dataset.zone ? "" : button.dataset.zone);
     };
   });
 }

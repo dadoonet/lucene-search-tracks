@@ -44,6 +44,17 @@ class TrackSuggestTest {
     }
 
     @Test
+    void joeSmo_returnsJoeSmoothFirst() throws Exception {
+        List<TrackSuggestion> hits = index.suggest("joe smo");
+        TrackTestLog.suggest("joe smo", null, hits);
+        assertThat(hits)
+                .isNotEmpty()
+                .first()
+                .extracting(TrackSuggestion::text, TrackSuggestion::field)
+                .containsExactly("Joe Smooth", "artist");
+    }
+
+    @Test
     void madonna_returnsArtist() throws Exception {
         List<TrackSuggestion> hits = index.suggest("Madonna");
         TrackTestLog.suggest("Madonna", null, hits);
