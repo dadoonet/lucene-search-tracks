@@ -8,7 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import static fr.pilato.test.lucene.TrackFacets.CAMELOT_CODES;
+import static fr.pilato.test.lucene.lucene.helpers.TrackFacets.CAMELOT_CODES;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetBucket;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.SearchRequest;
 import static org.assertj.core.api.Assertions.assertThat;
