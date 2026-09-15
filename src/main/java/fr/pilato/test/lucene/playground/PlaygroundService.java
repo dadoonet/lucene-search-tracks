@@ -2,13 +2,14 @@ package fr.pilato.test.lucene.playground;
 
 import fr.pilato.test.lucene.Track;
 import fr.pilato.test.lucene.TrackDatasetLoader;
-import fr.pilato.test.lucene.TrackHighlighter;
+import fr.pilato.test.lucene.playground.helpers.TrackHighlighter;
 import fr.pilato.test.lucene.TrackSuggestion;
-import fr.pilato.test.lucene.lucene.TrackSearchLucene;
-import fr.pilato.test.lucene.lucene.helpers.TrackAnalyzers;
-import fr.pilato.test.lucene.lucene.helpers.TrackDocumentMapper;
-import fr.pilato.test.lucene.lucene.helpers.TrackFacets;
-import fr.pilato.test.lucene.lucene.helpers.TrackLuceneQueryBuilder;
+import fr.pilato.test.lucene.TrackSearchLuceneImpl;
+import fr.pilato.test.lucene.playground.helpers.PlaygroundLuceneHelper;
+import fr.pilato.test.lucene.playground.helpers.TrackAnalyzers;
+import fr.pilato.test.lucene.playground.helpers.TrackDocumentMapper;
+import fr.pilato.test.lucene.playground.helpers.TrackFacets;
+import fr.pilato.test.lucene.playground.helpers.TrackLuceneQueryBuilder;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredValue;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
@@ -91,33 +92,42 @@ public final class PlaygroundService implements AutoCloseable {
 
     private final List<Track> corpus;
     private final Map<String, Track> byId;
-    private final TrackSearchLucene index;
+    private final TrackSearchLuceneImpl index;
+    private final PlaygroundLuceneHelper luceneIndex;
     private final String heapSize;
     private final long builtInMs;
 
-    public PlaygroundService(List<Track> corpus, TrackSearchLucene index, String heapSize, long builtInMs) {
+    public PlaygroundService(
+            List<Track> corpus,
+            TrackSearchLuceneImpl index,
+            PlaygroundLuceneHelper luceneIndex,
+            String heapSize,
+            long builtInMs) {
         this.corpus = List.copyOf(corpus);
         this.byId = new LinkedHashMap<>();
         for (Track track : this.corpus) {
             this.byId.put(track.id(), track);
         }
         this.index = index;
+        this.luceneIndex = luceneIndex;
         this.heapSize = heapSize;
         this.builtInMs = builtInMs;
     }
 
     public static PlaygroundService boot() throws IOException {
         List<Track> corpus = TrackDatasetLoader.load();
-        TrackSearchLucene index = new TrackSearchLucene();
+        TrackSearchLuceneImpl index = new TrackSearchLuceneImpl();
+        PlaygroundLuceneHelper luceneIndex = new PlaygroundLuceneHelper();
         long start = System.nanoTime();
         index.rebuild(corpus);
+        luceneIndex.rebuild(corpus);
         long builtInMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        String heapSize = RamUsageEstimator.humanReadableUnits(index.ramBytesUsed()).trim();
-        return new PlaygroundService(corpus, index, heapSize, builtInMs);
+        String heapSize = RamUsageEstimator.humanReadableUnits(luceneIndex.ramBytesUsed()).trim();
+        return new PlaygroundService(corpus, index, luceneIndex, heapSize, builtInMs);
     }
 
     public MetaResponse meta() {
-        return new MetaResponse(index.numDocs(), "ByteBuffersDirectory", heapSize, builtInMs);
+        return new MetaResponse(luceneIndex.numDocs(), "ByteBuffersDirectory", heapSize, builtInMs);
     }
 
     public AnalyzeResponse analyze(String text) {
@@ -212,7 +222,7 @@ public final class PlaygroundService implements AutoCloseable {
         String field = INDEX_TEXT_FIELDS.contains(fieldName)
                 ? fieldName
                 : TrackDocumentMapper.TITLE;
-        IndexSearcher searcher = index.searcher();
+        IndexSearcher searcher = luceneIndex.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             Terms terms = MultiTerms.getTerms(reader, field);
             long docFreq = 0;
@@ -236,7 +246,7 @@ public final class PlaygroundService implements AutoCloseable {
             }
             return new IndexResponse(
                     corpus.size(),
-                    index.numDocs(),
+                    luceneIndex.numDocs(),
                     "ByteBuffersDirectory",
                     needle,
                     field,
@@ -253,7 +263,7 @@ public final class PlaygroundService implements AutoCloseable {
                 ? Map.of() : request.mustNots();
         Query lucene = TrackLuceneQueryBuilder.buildStructured(q, filters, mustNots);
         List<String> tokens = TrackAnalyzers.tokenize(q);
-        IndexSearcher searcher = index.searcher();
+        IndexSearcher searcher = luceneIndex.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             TopDocs top = searcher.search(lucene, TOP_HITS);
             List<Map<String, String>> highlighted = TrackHighlighter.highlight(searcher, lucene, top);
@@ -377,7 +387,7 @@ public final class PlaygroundService implements AutoCloseable {
         Map<String, List<String>> excludeWithoutKey = new LinkedHashMap<>(exclude);
         excludeWithoutKey.remove("key");
         Query keyBase = TrackLuceneQueryBuilder.buildStructured(queryText, withoutKey, excludeWithoutKey);
-        IndexSearcher searcher = index.searcher();
+        IndexSearcher searcher = luceneIndex.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             var state = new DefaultSortedSetDocValuesReaderState(reader, TrackFacets.config());
             Facets facets;
@@ -411,7 +421,11 @@ public final class PlaygroundService implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        index.close();
+        try {
+            index.close();
+        } finally {
+            luceneIndex.close();
+        }
     }
 
     private static Facets mix(DefaultSortedSetDocValuesReaderState state, FacetsCollector hits)

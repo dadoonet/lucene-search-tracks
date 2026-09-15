@@ -1,18 +1,15 @@
-package fr.pilato.test.lucene.lucene;
+package fr.pilato.test.lucene;
 
-import fr.pilato.test.lucene.TrackDatasetLoader;
-import fr.pilato.test.lucene.TrackSearch;
-import fr.pilato.test.lucene.TrackSearchContractTest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 
-class TrackSearchLucene2Test extends TrackSearchContractTest {
+class TrackSearchLuceneImplTest extends TrackSearchContractTest {
 
-    private static TrackSearchLucene2 index;
+    private static TrackSearchLuceneImpl index;
 
     @BeforeAll
     static void rebuild() throws Exception {
-        index = new TrackSearchLucene2();
+        index = new TrackSearchLuceneImpl();
         index.rebuild(TrackDatasetLoader.load());
     }
 

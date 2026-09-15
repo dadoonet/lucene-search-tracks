@@ -1,4 +1,4 @@
-package fr.pilato.test.lucene.elasticsearch;
+package fr.pilato.test.lucene;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._helpers.bulk.BulkIngester;
@@ -12,11 +12,6 @@ import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.util.NamedValue;
-import fr.pilato.test.lucene.Track;
-import fr.pilato.test.lucene.TrackFacetsResult;
-import fr.pilato.test.lucene.TrackHit;
-import fr.pilato.test.lucene.TrackSearch;
-import fr.pilato.test.lucene.TrackSuggestion;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -29,7 +24,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class TrackSearchElasticsearch implements TrackSearch {
+public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     static final String INDEX = "tracks";
     private static final int SUGGEST_LIMIT = 10;
@@ -37,7 +32,7 @@ public final class TrackSearchElasticsearch implements TrackSearch {
 
     private final ElasticsearchClient client;
 
-    public TrackSearchElasticsearch(ElasticsearchClient client) {
+    public TrackSearchElasticsearchImpl(ElasticsearchClient client) {
         this.client = client;
     }
 

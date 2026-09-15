@@ -2,9 +2,9 @@
 
 Même `Track` + `tracks.ndjson`. Contrat `TrackSearch` ; le volume de code des **implémentations** reste le contraste.
 
-Lucene : `TrackSearchLucene` (ex-`TrackSearchIndex` + query/facets). Analyzers / mapper / query builder / `TrackFacets` vivent dans `lucene.helpers`. `TrackSearchLucene2` est l’équivalent autosuffisant pour le comparatif avec ES.
-Elasticsearch : `TrackSearchElasticsearch` (ex-`TrackElasticsearchIndex`).
-Assertions search / facets / suggest : `TrackSearchContractTest`, joué par `TrackSearchLuceneTest` et `TrackSearchElasticsearchTest`.
+Lucene : `PlaygroundLuceneHelper` (ex-`TrackSearchIndex` + query/facets). Analyzers / mapper / query builder / `TrackFacets` vivent dans `playground.helpers`. `TrackSearchLuceneImpl` est l’équivalent autosuffisant pour le comparatif avec ES ; le Playground l’utilise pour le contrat `TrackSearch`. `searcher()` / `numDocs()` / `ramBytesUsed()` restent sur `PlaygroundLuceneHelper`.
+Elasticsearch : `TrackSearchElasticsearchImpl` (ex-`TrackElasticsearchIndex`).
+Assertions search / facets / suggest : `TrackSearchContractTest`, joué par `TrackSearchLuceneImplTest` et `TrackSearchElasticsearchImplTest` (même package `fr.pilato.test.lucene` que les impls).
 
 ## 1. Ajout d’ES au POM
 
@@ -18,7 +18,7 @@ Pourquoi plus court : une coordonnée Maven remplace lucene-core / analysis-comm
 
 ## 2. Instanciation du client Java ES
 
-**Fichiers :** `TrackSearchElasticsearchTest` (~6 lignes).
+**Fichiers :** `TrackSearchElasticsearchImplTest` (~6 lignes).
 
 ```java
 ElasticsearchClient.of(b -> b
@@ -53,7 +53,7 @@ Pourquoi plus court : le bean part tel quel, pas de `TrackDocumentMapper.toDocum
 
 ## 5. Search
 
-**Fichiers :** `search(...)` (~20 lignes) ; assertions dans `TrackElasticsearchTest`.
+**Fichiers :** `search(...)` (~20 lignes) ; assertions dans `TrackSearchElasticsearchImplTest`.
 
 `multi_match` `bool_prefix` + `operator: and` sur `title^4` … `comment^0.5` ; `term` sur `*.raw` / `key` ; `must_not` sur `key`.
 

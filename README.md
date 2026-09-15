@@ -27,11 +27,11 @@ side: [`docs/elasticsearch-vs-lucene.md`](docs/elasticsearch-vs-lucene.md).
 
 | Post              | Lucene                    | Elasticsearch                          |
 |-------------------|---------------------------|----------------------------------------|
-| Part 1 Mapping    | `TrackDocumentMapperTest` | index template in `TrackSearchElasticsearch` |
-| Part 2 Index      | `TrackSearchIndexTest`    | `BulkIngester` of `Track` beans        |
-| Part 3 Search     | `TrackSearchContractTest` via `TrackSearchLuceneTest` | same contract via `TrackSearchElasticsearchTest` |
+| Part 1 Mapping    | `TrackDocumentMapperTest` (`playground.helpers`) | index template in `TrackSearchElasticsearchImpl` |
+| Part 2 Index      | `PlaygroundLuceneHelper` / `TrackSearchLuceneImpl` | `BulkIngester` of `Track` beans        |
+| Part 3 Search     | `TrackSearchContractTest` via `TrackSearchLuceneImplTest` | same contract via `TrackSearchElasticsearchImplTest` |
 | Part 4 Suggest    | same                      | same                                   |
 | Part 5 Facets     | same                      | same (aggs + `post_filter`)            |
-| Highlighting      | `TrackHighlighterTest`    | —                                      |
+| Highlighting      | `TrackHighlighterTest` (`playground.helpers`) | —                                      |
 
-`TrackSearch` is the shared API (`rebuild` / `search` / `facets` / `suggest`). Construct `TrackSearchLucene` or `TrackSearchElasticsearch`.
+`TrackSearch` is the shared API (`rebuild` / `search` / `facets` / `suggest`). Construct `TrackSearchLuceneImpl` or `TrackSearchElasticsearchImpl`. Playground extras (`searcher()`, analyzers, mapping UI) live under `fr.pilato.test.lucene.playground` / `playground.helpers`.

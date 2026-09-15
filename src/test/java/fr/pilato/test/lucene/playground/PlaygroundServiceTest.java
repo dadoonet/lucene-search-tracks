@@ -1,14 +1,17 @@
 package fr.pilato.test.lucene.playground;
 
+import fr.pilato.test.lucene.TrackSearchLuceneImpl;
+import fr.pilato.test.lucene.playground.helpers.PlaygroundLuceneHelper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import static fr.pilato.test.lucene.lucene.helpers.TrackFacets.CAMELOT_CODES;
+import static fr.pilato.test.lucene.playground.helpers.TrackFacets.CAMELOT_CODES;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetBucket;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.SearchRequest;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +29,16 @@ class PlaygroundServiceTest {
     @AfterAll
     static void close() throws Exception {
         service.close();
+    }
+
+    @Test
+    void boot_usesTrackSearchLucene2_andKeepsExtrasOnTrackSearchLucene() throws Exception {
+        assertThat(PlaygroundService.class.getDeclaredField("index").getType())
+                .isEqualTo(TrackSearchLuceneImpl.class);
+        assertThat(PlaygroundLuceneHelper.class).hasDeclaredMethods("searcher", "numDocs", "ramBytesUsed");
+        assertThat(TrackSearchLuceneImpl.class.getDeclaredMethods())
+                .extracting(Method::getName)
+                .doesNotContain("searcher", "numDocs", "ramBytesUsed");
     }
 
     @Test

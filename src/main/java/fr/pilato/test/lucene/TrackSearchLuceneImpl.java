@@ -1,10 +1,5 @@
-package fr.pilato.test.lucene.lucene;
+package fr.pilato.test.lucene;
 
-import fr.pilato.test.lucene.Track;
-import fr.pilato.test.lucene.TrackFacetsResult;
-import fr.pilato.test.lucene.TrackHit;
-import fr.pilato.test.lucene.TrackSearch;
-import fr.pilato.test.lucene.TrackSuggestion;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.LowerCaseFilter;
 import org.apache.lucene.analysis.TokenStream;
@@ -71,10 +66,11 @@ import java.util.Set;
 
 /**
  * Self-contained Lucene {@link TrackSearch}: same public surface as
- * {@link fr.pilato.test.lucene.elasticsearch.TrackSearchElasticsearch}, with
- * analyzer / mapping / query / facets / suggest inlined. Not wired into tests.
+ * {@link TrackSearchElasticsearchImpl}, with
+ * analyzer / mapping / query / facets / suggest inlined. Playground uses this
+ * for the {@link TrackSearch} contract.
  */
-public final class TrackSearchLucene2 implements TrackSearch {
+public final class TrackSearchLuceneImpl implements TrackSearch {
 
     private static final int SUGGEST_LIMIT = 10;
     private static final float TITLE_BOOST = 4.0f;
@@ -93,7 +89,7 @@ public final class TrackSearchLucene2 implements TrackSearch {
     private final Object writeLock = new Object();
     private final Map<String, Track> tracks = new LinkedHashMap<>();
 
-    public TrackSearchLucene2() throws IOException {
+    public TrackSearchLuceneImpl() throws IOException {
         directory = new ByteBuffersDirectory();
         writer = new IndexWriter(directory, new IndexWriterConfig(analyzer()));
         suggestionDirectory = new ByteBuffersDirectory();

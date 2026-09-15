@@ -1,9 +1,6 @@
-package fr.pilato.test.lucene.elasticsearch;
+package fr.pilato.test.lucene;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import fr.pilato.test.lucene.TrackDatasetLoader;
-import fr.pilato.test.lucene.TrackSearch;
-import fr.pilato.test.lucene.TrackSearchContractTest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
@@ -11,7 +8,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-class TrackSearchElasticsearchTest extends TrackSearchContractTest {
+class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
 
     private static final String IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.5.2";
 
@@ -19,7 +16,7 @@ class TrackSearchElasticsearchTest extends TrackSearchContractTest {
     static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(IMAGE);
 
     private static ElasticsearchClient client;
-    private static TrackSearchElasticsearch index;
+    private static TrackSearchElasticsearchImpl index;
 
     @BeforeAll
     static void rebuild() throws Exception {
@@ -27,7 +24,7 @@ class TrackSearchElasticsearchTest extends TrackSearchContractTest {
                 .host("https://" + elasticsearch.getHttpHostAddress())
                 .usernameAndPassword("elastic", ElasticsearchContainer.ELASTICSEARCH_DEFAULT_PASSWORD)
                 .sslContext(elasticsearch.createSslContextFromCa()));
-        index = new TrackSearchElasticsearch(client);
+        index = new TrackSearchElasticsearchImpl(client);
         index.rebuild(TrackDatasetLoader.load());
     }
 

@@ -1,4 +1,4 @@
-package fr.pilato.test.lucene.lucene.helpers;
+package fr.pilato.test.lucene.playground.helpers;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.LowerCaseFilter;

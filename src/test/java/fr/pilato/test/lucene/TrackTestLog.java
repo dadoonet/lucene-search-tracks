@@ -1,6 +1,6 @@
 package fr.pilato.test.lucene;
 
-import fr.pilato.test.lucene.lucene.helpers.TrackDocumentMapper;
+import fr.pilato.test.lucene.playground.helpers.TrackDocumentMapper;
 import org.apache.lucene.facet.LabelAndValue;
 import org.apache.lucene.search.Query;
 

@@ -1,14 +1,9 @@
-package fr.pilato.test.lucene.lucene;
+package fr.pilato.test.lucene.playground.helpers;
 
 import fr.pilato.test.lucene.Track;
 import fr.pilato.test.lucene.TrackFacetsResult;
 import fr.pilato.test.lucene.TrackHit;
-import fr.pilato.test.lucene.TrackSearch;
 import fr.pilato.test.lucene.TrackSuggestion;
-import fr.pilato.test.lucene.lucene.helpers.TrackAnalyzers;
-import fr.pilato.test.lucene.lucene.helpers.TrackDocumentMapper;
-import fr.pilato.test.lucene.lucene.helpers.TrackFacets;
-import fr.pilato.test.lucene.lucene.helpers.TrackLuceneQueryBuilder;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.facet.DrillDownQuery;
 import org.apache.lucene.facet.DrillSideways;
@@ -45,7 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public final class TrackSearchLucene implements TrackSearch {
+public final class PlaygroundLuceneHelper implements AutoCloseable {
 
     private static final int SUGGEST_LIMIT = 10;
 
@@ -56,7 +51,7 @@ public final class TrackSearchLucene implements TrackSearch {
     private final Object writeLock = new Object();
     private final Map<String, Track> tracks = new LinkedHashMap<>();
 
-    public TrackSearchLucene() throws IOException {
+    public PlaygroundLuceneHelper() throws IOException {
         directory = new ByteBuffersDirectory();
         IndexWriterConfig config = new IndexWriterConfig(TrackAnalyzers.searchAnalyzer());
         writer = new IndexWriter(directory, config);
@@ -65,7 +60,6 @@ public final class TrackSearchLucene implements TrackSearch {
                 suggestionDirectory, TrackAnalyzers.searchAnalyzer());
     }
 
-    @Override
     public void rebuild(List<Track> tracks) throws IOException {
         synchronized (writeLock) {
             writer.deleteAll();
@@ -81,7 +75,6 @@ public final class TrackSearchLucene implements TrackSearch {
         }
     }
 
-    @Override
     public List<TrackHit> search(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws IOException {
@@ -92,7 +85,6 @@ public final class TrackSearchLucene implements TrackSearch {
         }
     }
 
-    @Override
     public TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws IOException {
         IndexSearcher searcher = searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
@@ -116,12 +108,10 @@ public final class TrackSearchLucene implements TrackSearch {
         }
     }
 
-    @Override
     public List<TrackSuggestion> suggest(String prefix) throws IOException {
         return suggest(prefix, null);
     }
 
-    @Override
     public List<TrackSuggestion> suggest(String prefix, Collection<Track> scope) throws IOException {
         if (prefix == null || prefix.isBlank()) {
             return List.of();
@@ -204,7 +194,7 @@ public final class TrackSearchLucene implements TrackSearch {
         return TrackFacets.config().build(TrackDocumentMapper.toDocument(track));
     }
 
-    void rebuildSuggester() throws IOException {
+    private void rebuildSuggester() throws IOException {
         suggester.build(new TrackSuggestionInputIterator(tracks.values()));
     }
 

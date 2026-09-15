@@ -1,7 +1,5 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.playground.helpers;
 
-import fr.pilato.test.lucene.lucene.helpers.TrackAnalyzers;
-import fr.pilato.test.lucene.lucene.helpers.TrackDocumentMapper;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;

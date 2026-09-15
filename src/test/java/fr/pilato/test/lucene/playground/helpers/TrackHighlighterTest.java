@@ -1,8 +1,8 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.playground.helpers;
 
-import fr.pilato.test.lucene.lucene.TrackSearchLucene;
-import fr.pilato.test.lucene.lucene.helpers.TrackDocumentMapper;
-import fr.pilato.test.lucene.lucene.helpers.TrackLuceneQueryBuilder;
+import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackDatasetLoader;
+import fr.pilato.test.lucene.TrackTestLog;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
@@ -19,12 +19,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TrackHighlighterTest {
 
     private static List<Track> corpus;
-    private static TrackSearchLucene index;
+    private static PlaygroundLuceneHelper index;
 
     @BeforeAll
     static void rebuild() throws Exception {
         corpus = TrackDatasetLoader.load();
-        index = new TrackSearchLucene();
+        index = new PlaygroundLuceneHelper();
         index.rebuild(corpus);
     }
 
