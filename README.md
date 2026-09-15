@@ -27,9 +27,11 @@ side: [`docs/elasticsearch-vs-lucene.md`](docs/elasticsearch-vs-lucene.md).
 
 | Post              | Lucene                    | Elasticsearch                          |
 |-------------------|---------------------------|----------------------------------------|
-| Part 1 Mapping    | `TrackDocumentMapperTest` | index template in `TrackElasticsearchIndex` |
+| Part 1 Mapping    | `TrackDocumentMapperTest` | index template in `TrackSearchElasticsearch` |
 | Part 2 Index      | `TrackSearchIndexTest`    | `BulkIngester` of `Track` beans        |
-| Part 3 Search     | `TrackSearchTest`         | `TrackElasticsearchTest` (search)      |
-| Part 4 Suggest    | `TrackSuggestTest`        | `TrackElasticsearchTest` (suggest)     |
-| Part 5 Facets     | `TrackFacetsTest`         | `TrackElasticsearchTest` (aggs + `post_filter`) |
+| Part 3 Search     | `TrackSearchContractTest` via `TrackSearchLuceneTest` | same contract via `TrackSearchElasticsearchTest` |
+| Part 4 Suggest    | same                      | same                                   |
+| Part 5 Facets     | same                      | same (aggs + `post_filter`)            |
 | Highlighting      | `TrackHighlighterTest`    | —                                      |
+
+`TrackSearch` is the shared API (`rebuild` / `search` / `facets` / `suggest`). Construct `TrackSearchLucene` or `TrackSearchElasticsearch`.

@@ -13,7 +13,9 @@ import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.util.NamedValue;
 import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackFacetsResult;
 import fr.pilato.test.lucene.TrackHit;
+import fr.pilato.test.lucene.TrackSearch;
 import fr.pilato.test.lucene.TrackSuggestion;
 
 import java.io.IOException;
@@ -27,7 +29,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class TrackElasticsearchIndex implements AutoCloseable {
+public final class TrackSearchElasticsearch implements TrackSearch {
 
     static final String INDEX = "tracks";
     private static final int SUGGEST_LIMIT = 10;
@@ -35,10 +37,11 @@ public final class TrackElasticsearchIndex implements AutoCloseable {
 
     private final ElasticsearchClient client;
 
-    public TrackElasticsearchIndex(ElasticsearchClient client) {
+    public TrackSearchElasticsearch(ElasticsearchClient client) {
         this.client = client;
     }
 
+    @Override
     public void rebuild(List<Track> tracks) throws IOException {
         client.indices().putIndexTemplate(t -> t
                 .name("tracks")
@@ -76,6 +79,7 @@ public final class TrackElasticsearchIndex implements AutoCloseable {
         client.indices().refresh(r -> r.index(INDEX));
     }
 
+    @Override
     public List<TrackHit> search(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws IOException {
@@ -93,7 +97,8 @@ public final class TrackElasticsearchIndex implements AutoCloseable {
         return List.copyOf(hits);
     }
 
-    public Facets facets(String q, Map<String, List<String>> postFilters) throws IOException {
+    @Override
+    public TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws IOException {
         Query post = filterQuery(postFilters);
         Query scoped = post != null ? post : Query.of(qb -> qb.matchAll(m -> m));
         SearchResponse<Track> response = client.search(s -> {
@@ -118,17 +123,19 @@ public final class TrackElasticsearchIndex implements AutoCloseable {
                 Track.class);
         Map<String, Aggregate> aggs = response.aggregations();
         Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
-        return new Facets(
+        return new TrackFacetsResult(
                 terms(aggs.get("genre")),
                 rangeCount(metrics.get("bpm"), "120 – 130"),
                 terms(metrics.get("rating")),
                 rangeCount(metrics.get("year"), "2020–2029"));
     }
 
+    @Override
     public List<TrackSuggestion> suggest(String prefix) throws IOException {
         return suggest(prefix, null);
     }
 
+    @Override
     public List<TrackSuggestion> suggest(String prefix, Collection<Track> scope) throws IOException {
         if (prefix == null || prefix.isBlank() || (scope != null && scope.isEmpty())) {
             return List.of();
@@ -168,13 +175,6 @@ public final class TrackElasticsearchIndex implements AutoCloseable {
 
     @Override
     public void close() {}
-
-    public record Facets(
-            Map<String, Long> genres,
-            long bpm120to130,
-            Map<String, Long> ratings,
-            long year2020s
-    ) {}
 
     private static Query query(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {

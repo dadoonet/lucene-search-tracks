@@ -1,10 +1,10 @@
 # Elasticsearch vs Lucene — journal d’effort
 
-Même `Track` + `tracks.ndjson`. Pas d’interface commune : le volume de code *est* le contraste.
+Même `Track` + `tracks.ndjson`. Contrat `TrackSearch` ; le volume de code des **implémentations** reste le contraste.
 
-Lucene (déjà là) : `TrackAnalyzers` 102 + `TrackDocumentMapper` 80 + `TrackSearchIndex` 209 + `TrackLuceneQueryBuilder` 196 + `TrackFacets` 29 ≈ **616 lignes**, plus la sous-classe `DrillSideways` dans le test.
-
-Elasticsearch : une classe `TrackElasticsearchIndex` (~285 lignes, helpers inclus) + le client dans le test.
+Lucene : `TrackSearchLucene` (ex-`TrackSearchIndex` + query/facets) + analyzers / mapper / query builder / `TrackFacets`.
+Elasticsearch : `TrackSearchElasticsearch` (ex-`TrackElasticsearchIndex`).
+Assertions search / facets / suggest : `TrackSearchContractTest`, joué par `TrackSearchLuceneTest` et `TrackSearchElasticsearchTest`.
 
 ## 1. Ajout d’ES au POM
 
@@ -18,7 +18,7 @@ Pourquoi plus court : une coordonnée Maven remplace lucene-core / analysis-comm
 
 ## 2. Instanciation du client Java ES
 
-**Fichiers :** `TrackElasticsearchTest` (~6 lignes).
+**Fichiers :** `TrackSearchElasticsearchTest` (~6 lignes).
 
 ```java
 ElasticsearchClient.of(b -> b
@@ -33,7 +33,7 @@ Pourquoi plus court : pas d’`IndexWriter` / `ByteBuffersDirectory` / `Analyzer
 
 ## 3. Création d’un index avec son template
 
-**Fichiers :** `TrackElasticsearchIndex.rebuild` — `putIndexTemplate` + `create` (~25 lignes).
+**Fichiers :** `TrackSearchElasticsearch.rebuild` — `putIndexTemplate` + `create` (~25 lignes).
 
 Analyzer `track` = standard + lowercase + asciifolding ; normalizer `keyword_ci` ; mapping text + `.raw` keyword.
 

@@ -8,7 +8,7 @@ import fr.pilato.test.lucene.lucene.TrackAnalyzers;
 import fr.pilato.test.lucene.lucene.TrackDocumentMapper;
 import fr.pilato.test.lucene.lucene.TrackFacets;
 import fr.pilato.test.lucene.lucene.TrackLuceneQueryBuilder;
-import fr.pilato.test.lucene.lucene.TrackSearchIndex;
+import fr.pilato.test.lucene.lucene.TrackSearchLucene;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredValue;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
@@ -91,11 +91,11 @@ public final class PlaygroundService implements AutoCloseable {
 
     private final List<Track> corpus;
     private final Map<String, Track> byId;
-    private final TrackSearchIndex index;
+    private final TrackSearchLucene index;
     private final String heapSize;
     private final long builtInMs;
 
-    public PlaygroundService(List<Track> corpus, TrackSearchIndex index, String heapSize, long builtInMs) {
+    public PlaygroundService(List<Track> corpus, TrackSearchLucene index, String heapSize, long builtInMs) {
         this.corpus = List.copyOf(corpus);
         this.byId = new LinkedHashMap<>();
         for (Track track : this.corpus) {
@@ -108,7 +108,7 @@ public final class PlaygroundService implements AutoCloseable {
 
     public static PlaygroundService boot() throws IOException {
         List<Track> corpus = TrackDatasetLoader.load();
-        TrackSearchIndex index = new TrackSearchIndex();
+        TrackSearchLucene index = new TrackSearchLucene();
         long start = System.nanoTime();
         index.rebuild(corpus);
         long builtInMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);

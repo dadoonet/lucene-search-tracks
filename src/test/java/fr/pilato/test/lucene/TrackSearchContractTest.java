@@ -1,17 +1,6 @@
-package fr.pilato.test.lucene.elasticsearch;
+package fr.pilato.test.lucene;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import fr.pilato.test.lucene.Track;
-import fr.pilato.test.lucene.TrackDatasetLoader;
-import fr.pilato.test.lucene.TrackHit;
-import fr.pilato.test.lucene.TrackSuggestion;
-import fr.pilato.test.lucene.TrackTestLog;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.elasticsearch.ElasticsearchContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
 import java.util.Map;
@@ -19,33 +8,9 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
-@Testcontainers
-class TrackElasticsearchTest {
+public abstract class TrackSearchContractTest {
 
-    private static final String IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.5.2";
-
-    @Container
-    static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(IMAGE);
-
-    private static ElasticsearchClient client;
-    private static TrackElasticsearchIndex index;
-
-    @BeforeAll
-    static void rebuild() throws Exception {
-        client = ElasticsearchClient.of(b -> b
-                .host("https://" + elasticsearch.getHttpHostAddress())
-                .usernameAndPassword("elastic", ElasticsearchContainer.ELASTICSEARCH_DEFAULT_PASSWORD)
-                .sslContext(elasticsearch.createSslContextFromCa()));
-        index = new TrackElasticsearchIndex(client);
-        index.rebuild(TrackDatasetLoader.load());
-    }
-
-    @AfterAll
-    static void close() throws Exception {
-        if (client != null) {
-            client.close();
-        }
-    }
+    protected abstract TrackSearch index();
 
     @Test
     void bob_returns62Hits() throws Exception {
@@ -83,8 +48,19 @@ class TrackElasticsearchTest {
     }
 
     @Test
+    void applyingGenreChip_isFilterNotFreeText() throws Exception {
+        List<TrackHit> withQHits = index().search(
+                "club", Map.of("genre", List.of("Club House")), Map.of());
+        TrackTestLog.search("club", Map.of("genre", List.of("Club House")), Map.of(), withQHits);
+        List<TrackHit> chipOnlyHits = index().search(
+                "", Map.of("genre", List.of("Club House")), Map.of());
+        TrackTestLog.search("", Map.of("genre", List.of("Club House")), Map.of(), chipOnlyHits);
+        assertThat(chipOnlyHits.size()).isGreaterThanOrEqualTo(withQHits.size());
+    }
+
+    @Test
     void bob_countsGenreBpmRatingYear() throws Exception {
-        TrackElasticsearchIndex.Facets facets = index.facets("Bob", Map.of());
+        TrackFacetsResult facets = index().facets("Bob", Map.of());
         assertThat(count(facets.genres(), "Club")).isEqualTo(26);
         assertThat(facets.bpm120to130()).isEqualTo(52);
         assertThat(count(facets.ratings(), "5")).isEqualTo(13);
@@ -98,7 +74,7 @@ class TrackElasticsearchTest {
 
     @Test
     void postFilter_keepsOtherGenres() throws Exception {
-        TrackElasticsearchIndex.Facets facets = index.facets("Bob", Map.of("genre", List.of("Club")));
+        TrackFacetsResult facets = index().facets("Bob", Map.of("genre", List.of("Club")));
         assertThat(count(facets.genres(), "Dance")).isGreaterThan(0);
         assertThat(facets.bpm120to130()).isLessThan(52);
         TrackTestLog.drillSideways(
@@ -111,7 +87,7 @@ class TrackElasticsearchTest {
 
     @Test
     void club_returnsGenreAndTitle() throws Exception {
-        List<TrackSuggestion> hits = index.suggest("club");
+        List<TrackSuggestion> hits = index().suggest("club");
         TrackTestLog.suggest("club", null, hits);
         assertThat(hits)
                 .extracting(TrackSuggestion::text, TrackSuggestion::field)
@@ -126,8 +102,19 @@ class TrackElasticsearchTest {
     }
 
     @Test
+    void joeSmo_returnsJoeSmoothFirst() throws Exception {
+        List<TrackSuggestion> hits = index().suggest("joe smo");
+        TrackTestLog.suggest("joe smo", null, hits);
+        assertThat(hits)
+                .isNotEmpty()
+                .first()
+                .extracting(TrackSuggestion::text, TrackSuggestion::field)
+                .containsExactly("Joe Smooth", "artist");
+    }
+
+    @Test
     void madonna_returnsArtist() throws Exception {
-        List<TrackSuggestion> hits = index.suggest("Madonna");
+        List<TrackSuggestion> hits = index().suggest("Madonna");
         TrackTestLog.suggest("Madonna", null, hits);
         assertThat(hits)
                 .extracting(TrackSuggestion::text, TrackSuggestion::field)
@@ -136,15 +123,15 @@ class TrackElasticsearchTest {
 
     @Test
     void emptyScope_returnsNothing() throws Exception {
-        List<TrackSuggestion> hits = index.suggest("club", List.of());
+        List<TrackSuggestion> hits = index().suggest("club", List.of());
         TrackTestLog.suggest("club", List.of(), hits);
         assertThat(hits).isEmpty();
     }
 
-    private static List<Track> search(
+    private List<Track> search(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws Exception {
-        List<TrackHit> hits = index.search(q, filters, mustNots);
+        List<TrackHit> hits = index().search(q, filters, mustNots);
         TrackTestLog.search(q, filters, mustNots, hits);
         return hits.stream().map(TrackHit::track).toList();
     }

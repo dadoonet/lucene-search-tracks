@@ -16,7 +16,7 @@ class TrackSearchIndexTest {
     @Test
     void rebuild_indexesEveryTrackInRam() throws Exception {
         List<Track> tracks = TrackDatasetLoader.load();
-        try (TrackSearchIndex index = new TrackSearchIndex()) {
+        try (TrackSearchLucene index = new TrackSearchLucene()) {
             index.rebuild(tracks);
             TrackTestLog.indexRebuilt(tracks.size(), index.numDocs());
             assertThat(index.numDocs()).isEqualTo(tracks.size());
