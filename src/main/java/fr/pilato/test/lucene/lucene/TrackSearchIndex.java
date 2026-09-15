@@ -1,5 +1,7 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.lucene;
 
+import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackSuggestion;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;

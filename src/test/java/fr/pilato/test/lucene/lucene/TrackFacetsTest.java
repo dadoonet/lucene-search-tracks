@@ -1,5 +1,7 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.lucene;
 
+import fr.pilato.test.lucene.TrackDatasetLoader;
+import fr.pilato.test.lucene.TrackTestLog;
 import org.apache.lucene.facet.DrillDownQuery;
 import org.apache.lucene.facet.DrillSideways;
 import org.apache.lucene.facet.FacetResult;

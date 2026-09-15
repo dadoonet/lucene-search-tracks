@@ -1,5 +1,7 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.lucene;
 
+import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackTestLog;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;

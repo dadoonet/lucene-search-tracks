@@ -1,31 +1,35 @@
 # lucene-search-tracks
 
-In-process [Apache Lucene](https://lucene.apache.org/) demo used by the
-**Lucene Bean Search** series (Parts 1–5). Production helpers live under
-`src/main`; tests under `src/test` rebuild a Rekordbox track snapshot in RAM
-(`ByteBuffersDirectory`), then search, autocomplete, and facet it.
+Companion repo for the **Lucene Bean Search** series (Parts 1–5) and the
+follow-up that repeats the same track search on Elasticsearch.
+
+Production helpers live under `src/main`; tests under `src/test` rebuild a
+Rekordbox track snapshot (`tracks.ndjson`) — in a Lucene RAM directory, or in
+Elasticsearch via Testcontainers — then search, autocomplete, and facet it.
 
 ```bash
 mvn test
 mvn compile exec:java
 ```
 
-Requires **Java 25**. The NDJSON under `src/main/resources/tracks.ndjson` is a
+Requires **Java 25**. Elasticsearch tests also need Docker (image
+`docker.elastic.co/elasticsearch/elasticsearch:9.5.2`). The NDJSON is a
 snapshot of a local Rekordbox library; tests never open SQLCipher. Each test
-prints an emoji narrative of the query and the top Lucene hits (with scores).
+prints an emoji narrative of the query and the top hits.
 
 `mvn compile exec:java` boots a Javalin playground on
 [http://localhost:7070](http://localhost:7070): analyze, map, index, search,
 facets, suggest, highlighting, then a demo tab on the far right. The Java
 snippet sits on the left, live controls in the middle, and Lucene’s view
 (tokens, posting lists, `Query`, `Explanation`, histograms, highlighted
-fields) on the right.
+fields) on the right. Effort notes for the Elasticsearch
+side: [`docs/elasticsearch-vs-lucene.md`](docs/elasticsearch-vs-lucene.md).
 
-| Post           | Test class                |
-|----------------|---------------------------|
-| Part 1 Mapping | `TrackDocumentMapperTest` |
-| Part 2 Index   | `TrackSearchIndexTest`    |
-| Part 3 Search  | `TrackSearchTest`         |
-| Part 4 Suggest | `TrackSuggestTest`        |
-| Part 5 Facets  | `TrackFacetsTest`         |
-| Highlighting   | `TrackHighlighterTest`    |
+| Post              | Lucene                    | Elasticsearch                          |
+|-------------------|---------------------------|----------------------------------------|
+| Part 1 Mapping    | `TrackDocumentMapperTest` | index template in `TrackElasticsearchIndex` |
+| Part 2 Index      | `TrackSearchIndexTest`    | `BulkIngester` of `Track` beans        |
+| Part 3 Search     | `TrackSearchTest`         | `TrackElasticsearchTest` (search)      |
+| Part 4 Suggest    | `TrackSuggestTest`        | `TrackElasticsearchTest` (suggest)     |
+| Part 5 Facets     | `TrackFacetsTest`         | `TrackElasticsearchTest` (aggs + `post_filter`) |
+| Highlighting      | `TrackHighlighterTest`    | —                                      |

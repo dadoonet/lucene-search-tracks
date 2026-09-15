@@ -1,5 +1,7 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.lucene;
 
+import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackHit;
 import org.apache.lucene.document.DoubleField;
 import org.apache.lucene.document.IntField;
 import org.apache.lucene.facet.range.DoubleRange;

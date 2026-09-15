@@ -1,5 +1,8 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.lucene;
 
+import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackDatasetLoader;
+import fr.pilato.test.lucene.TrackTestLog;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.IndexSearcher;
 import org.junit.jupiter.api.Test;

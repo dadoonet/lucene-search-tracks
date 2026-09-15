@@ -1,14 +1,14 @@
 package fr.pilato.test.lucene.playground;
 
 import fr.pilato.test.lucene.Track;
-import fr.pilato.test.lucene.TrackAnalyzers;
 import fr.pilato.test.lucene.TrackDatasetLoader;
-import fr.pilato.test.lucene.TrackDocumentMapper;
-import fr.pilato.test.lucene.TrackFacets;
 import fr.pilato.test.lucene.TrackHighlighter;
-import fr.pilato.test.lucene.TrackLuceneQueryBuilder;
-import fr.pilato.test.lucene.TrackSearchIndex;
 import fr.pilato.test.lucene.TrackSuggestion;
+import fr.pilato.test.lucene.lucene.TrackAnalyzers;
+import fr.pilato.test.lucene.lucene.TrackDocumentMapper;
+import fr.pilato.test.lucene.lucene.TrackFacets;
+import fr.pilato.test.lucene.lucene.TrackLuceneQueryBuilder;
+import fr.pilato.test.lucene.lucene.TrackSearchIndex;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredValue;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;

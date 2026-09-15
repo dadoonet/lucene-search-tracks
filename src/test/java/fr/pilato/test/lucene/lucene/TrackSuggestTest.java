@@ -1,5 +1,10 @@
-package fr.pilato.test.lucene;
+package fr.pilato.test.lucene.lucene;
 
+import fr.pilato.test.lucene.Track;
+import fr.pilato.test.lucene.TrackDatasetLoader;
+import fr.pilato.test.lucene.TrackHit;
+import fr.pilato.test.lucene.TrackSuggestion;
+import fr.pilato.test.lucene.TrackTestLog;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
