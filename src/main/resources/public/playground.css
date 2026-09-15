@@ -264,6 +264,10 @@ body.is-col-resize * {
   border-radius: 2px;
 }
 
+.java-line.is-blank {
+  min-height: 1.55em;
+}
+
 .java-line.is-on {
   background: color-mix(in srgb, var(--cue) 22%, transparent);
   box-shadow: inset 3px 0 0 var(--cue);
@@ -274,6 +278,53 @@ body.is-col-resize * {
 .track-card-title[data-map-root],
 .track-card-row[data-map-root] {
   cursor: default;
+}
+
+.java-fold {
+  margin: 0 -0.45rem;
+}
+
+.java-fold-bar {
+  display: grid;
+  grid-template-columns: 1.35rem 1fr;
+  align-items: center;
+  column-gap: 0.2rem;
+}
+
+.java-fold-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--mute);
+  width: 1.35rem;
+  height: 1.55em;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.java-fold-toggle:hover,
+.java-fold-toggle:focus-visible {
+  color: var(--cue);
+}
+
+.java-fold-bar .java-line {
+  margin: 0;
+}
+
+.java-fold-body {
+  margin: 0.15rem 0 0.2rem 1.55rem;
+  padding: 0.3rem 0.55rem;
+  background: color-mix(in srgb, var(--label) 12%, var(--panel));
+  border-radius: 2px;
+}
+
+.java-fold-body .java-line {
+  margin: 0;
+  padding: 0;
 }
 
 .tok-kw { color: var(--cue); }

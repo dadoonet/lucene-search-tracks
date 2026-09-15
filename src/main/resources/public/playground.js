@@ -135,12 +135,22 @@ writer.commit();`,
     kicker: "Part 3 · BooleanQuery",
     title: "Search",
     lede: "Each analyzed token is a SHOULD across fields. The last token also gets a PrefixQuery. FILTER and MUST_NOT wrap that BooleanQuery.",
-    snippet: `IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
-BooleanQuery.Builder bqb = new BooleanQuery.Builder();
-bqb.add(new BoostQuery(new TermQuery(new Term("title", "bob")), 4.0f), BooleanClause.Occur.SHOULD);
-bqb.add(new BoostQuery(new PrefixQuery(new Term("title", "bob")), 1.0f), BooleanClause.Occur.SHOULD);
-bqb.setMinimumNumberShouldMatch(1);
-Query q = bqb.build();`,
+    snippet: `// Open an index searcher using the same writer
+IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
+
+TokenStream ts = analyzer.tokenStream("title", "Bob");
+// → bob
+
+// build query for bob
+BooleanQuery.Builder bob = buildQuery("bob");
+
+Query q = bob.build();
+
+// Search and retrieve the 10 first hits
+TopDocs hits = searcher.search(q, 10);
+
+// Explain how the score is computed for the first hit
+searcher.explain(q, hits.scoreDocs[0].doc);`,
     render(root) {
       root.innerHTML = `
         <div class="controls">
@@ -773,9 +783,25 @@ function luceneNormalize(value) {
   return String(value).normalize("NFC").toLowerCase();
 }
 
-function javaIdent(token, i, tokens) {
-  const base = /^[A-Za-z_][A-Za-z0-9_]*$/.test(token) ? token : `tok${i}`;
-  return tokens.filter((t) => t === token).length > 1 ? `${base}_${i}` : base;
+const SEARCH_RESERVED = new Set([
+  "analyzer", "bqb", "bool", "doc", "hits", "key", "keys", "q", "query",
+  "searcher", "term", "text", "tokens", "ts", "writer"
+]);
+
+function searchBuilderName(token, i, used) {
+  let base;
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(token) && !JAVA_KEYWORDS.has(token)) {
+    base = SEARCH_RESERVED.has(token) ? `${token}_` : token;
+  } else {
+    base = `tok${i}`;
+  }
+  let name = base;
+  let n = 2;
+  while (used.has(name)) {
+    name = `${base}${n++}`;
+  }
+  used.add(name);
+  return name;
 }
 
 const SEARCH_TEXT_FIELDS = [
@@ -787,12 +813,8 @@ const SEARCH_TEXT_FIELDS = [
   { field: "comment", boost: 0.5, prefixBoost: 0.125 }
 ];
 
-function tokenBuilderJava(token, prefix, declare) {
-  const lines = [
-    declare
-        ? "BooleanQuery.Builder bqb = new BooleanQuery.Builder();"
-        : "bqb = new BooleanQuery.Builder();"
-  ];
+function tokenBuilderBody(token, prefix) {
+  const lines = ["BooleanQuery.Builder bqb = new BooleanQuery.Builder();"];
   for (const { field, boost, prefixBoost } of SEARCH_TEXT_FIELDS) {
     lines.push(
         `bqb.add(new BoostQuery(new TermQuery(new Term(${javaString(field)}, ${javaString(token)})), ${javaFloat(boost)}), BooleanClause.Occur.SHOULD);`);
@@ -805,90 +827,136 @@ function tokenBuilderJava(token, prefix, declare) {
   return lines;
 }
 
-function searchSnippet(tokens, genre, minus, explainDoc) {
+const searchFoldOpen = new Set();
+
+function searchSnippetBlocks(q, tokens, genre, minus, explainDoc) {
   const terms = (tokens || []).filter(Boolean);
   const genreValue = (genre || "").trim();
-  const keys = (minus || "").trim() ? minus.split(/\s*,\s*/).filter(Boolean) : [];
-  const lines = [
-    "IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));",
-    ""
-  ];
+  const keyValues = (minus || "").trim() ? minus.split(/\s*,\s*/).filter(Boolean) : [];
   const explain = explainDoc == null ? "hits.scoreDocs[0].doc" : String(Number(explainDoc));
-  let declared = false;
+  const blocks = [
+    { type: "line", code: "// Open an index searcher using the same writer" },
+    { type: "line", code: "IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));" },
+    { type: "line", code: "" }
+  ];
 
-  const tokenQueries = [];
-  terms.forEach((token, i) => {
-    const prefix = i === terms.length - 1 && token.length >= 1;
-    lines.push(...tokenBuilderJava(token, prefix, !declared));
-    declared = true;
-    if (terms.length > 1) {
-      const name = javaIdent(token, i, terms);
-      lines.push(`Query ${name} = bqb.build();`);
-      tokenQueries.push(name);
-    }
-    lines.push("");
-  });
-
-  let textExpr = null;
-  if (terms.length === 1) {
-    textExpr = "bqb.build()";
-  } else if (terms.length > 1) {
-    lines.push(declared ? "bqb = new BooleanQuery.Builder();" : "BooleanQuery.Builder bqb = new BooleanQuery.Builder();");
-    declared = true;
-    tokenQueries.forEach((name) => {
-      lines.push(`bqb.add(${name}, BooleanClause.Occur.MUST);`);
+  if (String(q ?? "").trim()) {
+    blocks.push({ type: "line", code: `TokenStream ts = analyzer.tokenStream("title", ${javaString(q)});` });
+    blocks.push({
+      type: "line",
+      code: terms.length ? `// → ${terms.join(", ")}` : "// → (no tokens)"
     });
-    lines.push("");
-    textExpr = "bqb.build()";
+    blocks.push({ type: "line", code: "" });
   }
+
+  const used = new Set(SEARCH_RESERVED);
+  const builders = terms.map((token, i) => {
+    const name = searchBuilderName(token, i, used);
+    const prefix = i === terms.length - 1 && token.length >= 1;
+    blocks.push({ type: "line", code: `// build query for ${token}` });
+    blocks.push({
+      type: "fold",
+      id: name,
+      summary: `BooleanQuery.Builder ${name} = buildQuery(${javaString(token)});`,
+      body: tokenBuilderBody(token, prefix)
+    });
+    blocks.push({ type: "line", code: "" });
+    return name;
+  });
 
   const genreQuery = genreValue
       ? `new TermQuery(new Term("genre.raw.normalized", ${javaString(luceneNormalize(genreValue))}))`
       : null;
   let keyQuery = null;
-  if (keys.length === 1) {
-    keyQuery = `new TermQuery(new Term("key.code", ${javaString(luceneNormalize(keys[0]))}))`;
-  } else if (keys.length > 1) {
-    lines.push(declared ? "bqb = new BooleanQuery.Builder();" : "BooleanQuery.Builder bqb = new BooleanQuery.Builder();");
-    declared = true;
-    keys.forEach((key) => {
-      lines.push(
-          `bqb.add(new TermQuery(new Term("key.code", ${javaString(luceneNormalize(key))})), BooleanClause.Occur.SHOULD);`);
+  if (keyValues.length === 1) {
+    keyQuery = `new TermQuery(new Term("key.code", ${javaString(luceneNormalize(keyValues[0]))}))`;
+  } else if (keyValues.length > 1) {
+    blocks.push({ type: "line", code: "BooleanQuery.Builder keys = new BooleanQuery.Builder();" });
+    keyValues.forEach((key) => {
+      blocks.push({
+        type: "line",
+        code: `keys.add(new TermQuery(new Term("key.code", ${javaString(luceneNormalize(key))})), BooleanClause.Occur.SHOULD);`
+      });
     });
-    lines.push("bqb.setMinimumNumberShouldMatch(1);");
-    lines.push("Query key = bqb.build();");
-    lines.push("");
+    blocks.push({ type: "line", code: "keys.setMinimumNumberShouldMatch(1);" });
+    blocks.push({ type: "line", code: "Query key = keys.build();" });
+    blocks.push({ type: "line", code: "" });
     keyQuery = "key";
   }
 
-  const needsRoot = Boolean(genreQuery || keyQuery);
-  if (!textExpr && !needsRoot) {
-    lines.push("Query q = new MatchAllDocsQuery();");
-  } else if (textExpr && !needsRoot) {
-    lines.push(`Query q = ${textExpr};`);
+  const needsBool = builders.length > 1 || Boolean(genreQuery || keyQuery);
+  if (!builders.length && !genreQuery && !keyQuery) {
+    blocks.push({ type: "line", code: "Query q = new MatchAllDocsQuery();" });
+  } else if (builders.length === 1 && !needsBool) {
+    blocks.push({ type: "line", code: `Query q = ${builders[0]}.build();` });
   } else {
-    if (textExpr === "bqb.build()") {
-      lines.push("Query text = bqb.build();");
-      textExpr = "text";
-    }
-    lines.push(declared ? "bqb = new BooleanQuery.Builder();" : "BooleanQuery.Builder bqb = new BooleanQuery.Builder();");
-    if (textExpr) {
-      lines.push(`bqb.add(${textExpr}, BooleanClause.Occur.MUST);`);
-    } else if (keyQuery && !genreQuery) {
-      lines.push("bqb.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);");
+    blocks.push({ type: "line", code: "// Combine queries in a bool query" });
+    blocks.push({ type: "line", code: "BooleanQuery.Builder bool = new BooleanQuery.Builder();" });
+    builders.forEach((name) => {
+      blocks.push({
+        type: "line",
+        code: `bool.add(${name}.build(), BooleanClause.Occur.MUST);`
+      });
+    });
+    if (!builders.length && keyQuery && !genreQuery) {
+      blocks.push({
+        type: "line",
+        code: "bool.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);"
+      });
     }
     if (genreQuery) {
-      lines.push(`bqb.add(${genreQuery}, BooleanClause.Occur.FILTER);`);
+      blocks.push({ type: "line", code: `bool.add(${genreQuery}, BooleanClause.Occur.FILTER);` });
     }
     if (keyQuery) {
-      lines.push(`bqb.add(${keyQuery}, BooleanClause.Occur.MUST_NOT);`);
+      blocks.push({ type: "line", code: `bool.add(${keyQuery}, BooleanClause.Occur.MUST_NOT);` });
     }
-    lines.push("Query q = bqb.build();");
+    blocks.push({ type: "line", code: "Query q = bool.build();" });
   }
 
-  lines.push(`TopDocs hits = searcher.search(q, 25);`);
-  lines.push(`searcher.explain(q, ${explain});`);
-  return lines.join("\n");
+  blocks.push({ type: "line", code: "" });
+  blocks.push({ type: "line", code: "// Search and retrieve the 10 first hits" });
+  blocks.push({ type: "line", code: "TopDocs hits = searcher.search(q, 10);" });
+  blocks.push({ type: "line", code: "" });
+  blocks.push({ type: "line", code: "// Explain how the score is computed for the first hit" });
+  blocks.push({ type: "line", code: `searcher.explain(q, ${explain});` });
+  return blocks;
+}
+
+function javaLineHtml(code) {
+  if (code === "") {
+    return `<span class="java-line is-blank">\u00a0</span>`;
+  }
+  return `<span class="java-line">${highlightJava(code)}</span>`;
+}
+
+function setSearchSnippet(q, tokens, genre, minus, explainDoc) {
+  const html = searchSnippetBlocks(q, tokens, genre, minus, explainDoc).map((block) => {
+    if (block.type === "fold") {
+      const open = searchFoldOpen.has(block.id);
+      const icon = open ? "fa-square-minus" : "fa-square-plus";
+      const label = open ? "Collapse" : "Expand";
+      return `<div class="java-fold${open ? " is-open" : ""}" data-fold="${escapeAttr(block.id)}"><div class="java-fold-bar"><button type="button" class="java-fold-toggle" aria-expanded="${open}" aria-label="${label}"><i class="fa-regular ${icon}" aria-hidden="true"></i></button>${javaLineHtml(block.summary)}</div><div class="java-fold-body"${open ? "" : " hidden"}>${block.body.map(javaLineHtml).join("")}</div></div>`;
+    }
+    return javaLineHtml(block.code);
+  }).join("");
+  document.getElementById("snippet").innerHTML = html;
+  document.querySelectorAll("#snippet .java-fold-toggle").forEach((button) => {
+    button.onclick = () => {
+      const fold = button.closest(".java-fold");
+      const id = fold.dataset.fold;
+      const open = !searchFoldOpen.has(id);
+      if (open) {
+        searchFoldOpen.add(id);
+      } else {
+        searchFoldOpen.delete(id);
+      }
+      fold.classList.toggle("is-open", open);
+      fold.querySelector(".java-fold-body").hidden = !open;
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      button.setAttribute("aria-label", open ? "Collapse" : "Expand");
+      button.querySelector("i").className = `fa-regular ${open ? "fa-square-minus" : "fa-square-plus"}`;
+    };
+  });
 }
 
 function setSnippet(source) {
@@ -913,7 +981,7 @@ async function runSearch(explainDoc) {
       explainDoc: explainDoc ?? null
     })
   });
-  setSnippet(searchSnippet(data.tokens, genre, minus, explainDoc));
+  setSearchSnippet(q, data.tokens, genre, minus, explainDoc);
   setCues(data.tokens);
   const explained = data.hits.find((hit) => hit.explain);
   readout(`
