@@ -60,9 +60,9 @@ class PlaygroundAppTest {
                     .contains("5 Facets")
                     .contains("6 Suggest")
                     .contains("7 Highlighting")
-                    .contains("8 Demo")
+                    .contains("data-chapter=\"demo\">Demo</button>")
+                    .doesNotContain("8 Demo")
                     .contains("data-chapter=\"highlight\"")
-                    .contains("data-chapter=\"demo\"")
                     .contains("Built on Lucene " + Version.LATEST)
                     .contains("href=\"https://david.pilato.fr/\">David Pilato</a>");
         });
@@ -113,7 +113,21 @@ class PlaygroundAppTest {
                     .contains("camelot-badge")
                     .contains("facetBucketLabel")
                     .contains("hit.highlights")
-                    .contains("UnifiedHighlighter");
+                    .contains("UnifiedHighlighter")
+                    .contains("setZoneZoom(\"deck\")");
+        });
+    }
+
+    @Test
+    void playgroundJs_suggestWiresSuggesterAndHover() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/playground.js");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains("AnalyzingInfixSuggester suggester")
+                    .contains("bindSuggestHover")
+                    .contains("highlightKey")
+                    .contains("matches.get(");
         });
     }
 
@@ -143,8 +157,11 @@ class PlaygroundAppTest {
                     .contains("width: 2.6em")
                     .contains("[data-chapter=\"demo\"]")
                     .contains("margin-left: auto")
+                    .contains("border-color: var(--cue)")
                     .contains(".demo-table b")
-                    .contains(".hl-field");
+                    .contains(".hl-field")
+                    .contains("#readout b")
+                    .contains(".suggest-hit");
         });
     }
 }

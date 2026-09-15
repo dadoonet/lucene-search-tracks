@@ -78,6 +78,8 @@ h1 {
 
 .chapters [data-chapter="demo"] {
   margin-left: auto;
+  border-color: var(--cue);
+  color: var(--cue);
 }
 
 .chapters button {
@@ -281,10 +283,13 @@ body.is-col-resize * {
 
 .java-line[data-map-root],
 .java-line[data-explain-keys],
+.java-line[data-suggest-part],
 .map-group[data-map-root],
 .track-card-title[data-map-root],
 .track-card-row[data-map-root],
-.explain-line[data-explain-keys] {
+.explain-line[data-explain-keys],
+.suggest-step[data-suggest-part],
+.suggest-hit[data-suggest-part] {
   cursor: default;
 }
 
@@ -572,7 +577,11 @@ input[type="text"], select {
 
 .demo-suggest-text b,
 .demo-table b,
-.hl b { color: var(--phosphor); font-weight: 600; }
+.hl b,
+#readout b {
+  color: var(--cue);
+  font-weight: 700;
+}
 
 .demo-chips {
   display: flex;
@@ -948,6 +957,49 @@ input[type="text"], select {
 }
 
 .bucket.is-on { color: var(--cue); }
+
+.suggest-step {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr;
+  gap: 0.35rem 0.7rem;
+  padding: 0.28rem 0.4rem;
+  border-radius: 2px;
+  align-items: baseline;
+}
+
+.suggest-step.is-on {
+  background: color-mix(in srgb, var(--cue) 18%, transparent);
+  color: var(--cue);
+}
+
+.suggest-step.is-on .muted {
+  color: var(--cue);
+}
+
+.suggest-head,
+.suggest-hit {
+  display: grid;
+  grid-template-columns: 9.2rem minmax(0, 1fr) 5.2rem;
+  gap: 0.35rem 0.7rem;
+  padding: 0.28rem 0.4rem;
+  border-radius: 2px;
+}
+
+.suggest-head {
+  color: var(--phosphor-dim);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.suggest-hit {
+  border-bottom: 1px dotted #c8f27a33;
+}
+
+.suggest-hit.is-on {
+  background: color-mix(in srgb, var(--cue) 18%, transparent);
+  box-shadow: inset 3px 0 0 var(--cue);
+}
 
 .tok-pill {
   display: inline-block;
