@@ -36,6 +36,14 @@ public final class PlaygroundModels {
             String id,
             String title,
             String artist,
+            String genre,
+            String key,
+            double bpm,
+            int rating,
+            int year,
+            String album,
+            String label,
+            String comment,
             List<MappedField> fields,
             List<TrackPick> picks) {}
 
@@ -78,12 +86,17 @@ public final class PlaygroundModels {
 
     public record FacetDim(String name, String emoji, List<FacetBucket> buckets) {}
 
+    public record FacetRewriteLine(String luceneType, String name, String value, String role) {}
+
+    public record FacetRewrite(List<FacetRewriteLine> before, List<FacetRewriteLine> after) {}
+
     public record FacetsResponse(
             String q,
             String query,
             boolean drillSideways,
             String drillGenre,
-            List<FacetDim> dims) {}
+            List<FacetDim> dims,
+            FacetRewrite rewrite) {}
 
     public record SearchRequest(
             String q,

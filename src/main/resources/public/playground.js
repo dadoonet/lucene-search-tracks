@@ -14,9 +14,18 @@ const chapters = {
     kicker: "Part 1 · before the Document",
     title: "Analyzer",
     lede: "Start from the sentence. Apply each Lucene stage from the pane on the right.",
-    snippet: `Tokenizer source = new StandardTokenizer();
-TokenStream filter = new LowerCaseFilter(source);
-filter = new ASCIIFoldingFilter(filter);`,
+    snippet: `Analyzer analyzer = new Analyzer() {
+  @Override
+  protected TokenStreamComponents createComponents(String fieldName) {
+    Tokenizer source = new StandardTokenizer();
+    TokenStream filter = new LowerCaseFilter(source);
+    filter = new ASCIIFoldingFilter(filter);
+    return new TokenStreamComponents(source, filter);
+  }
+};
+// TokenFilter has no analyze(String) — it only wraps a TokenStream.
+// Analyzer.tokenStream(field, text) is how Lucene runs that chain.
+TokenStream ts = analyzer.tokenStream("title", "Around The World");`,
     render(root) {
       analyzeStep = -1;
       root.innerHTML = `
@@ -55,6 +64,13 @@ doc.add(new SortedSetDocValuesFacetField("genre", "Club"));`,
           <label class="field">Track
             <select id="map-track"></select>
           </label>
+          <article class="track-card" id="track-card" hidden>
+            <img class="track-card-art" id="track-card-art" alt="">
+            <div class="track-card-body">
+              <h3 class="track-card-title" id="track-card-title"></h3>
+              <dl class="track-card-meta" id="track-card-meta"></dl>
+            </div>
+          </article>
         </div>`;
       runMap();
     }
@@ -65,7 +81,11 @@ doc.add(new SortedSetDocValuesFacetField("genre", "Club"));`,
     lede: "The term is no longer in the title — the title is in the term. Type a token, read the posting list.",
     snippet: `Directory dir = new ByteBuffersDirectory();
 IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
-writer.addDocument(FacetsConfig.build(mapper.toDocument(track)));
+// Same Document as page 2.
+Document doc = mapper.toDocument(track);
+FacetsConfig facetsConfig = new FacetsConfig();
+// more on this at 6 — Facets
+writer.addDocument(facetsConfig.build(doc));
 writer.commit();
 IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));`,
     render(root) {
@@ -174,7 +194,8 @@ Query chip = new TermQuery(new Term("genre.raw.normalized", "club house"));`,
     kicker: "Part 5 · DrillSideways",
     title: "Facets",
     lede: "Counts follow the query. A Club drill-down narrows BPM; other genres stay visible.",
-    snippet: `FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)
+    snippet: `// Index time (page 3): FacetsConfig.build rewrites the page-2 facet field.
+FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)
     .facetsCollector();
 Facets genres = new SortedSetDocValuesFacetCounts(state, fc);
 Facets bpm = new DoubleRangeFacetCounts("bpm", fc, bpmRanges());
@@ -314,7 +335,6 @@ async function runAnalyze() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text })
   });
-  setCues(analyzeData.tokens);
   renderAnalyze();
 }
 
@@ -343,15 +363,34 @@ function renderAnalyze() {
       <div class="bbl-down">↓</div>
       <div class="bbl-flow">${columns.join("")}</div>`;
   }
+  const indexed = indexedTokens(data);
+  setCues(indexed);
   readout(`
     <div class="bbl-steps" id="analyze-steps">${buttons}</div>
-    ${body}`);
+    ${body}
+    <div class="idx-chips">${indexed.length
+        ? indexed.map((token) => `<span class="idx-chip">${escapeHtml(token)}</span>`).join("")
+        : `<span class="idx-chip is-empty">∅</span>`}</div>`);
   document.querySelectorAll("#analyze-steps [data-step]").forEach((button) => {
     button.onclick = () => {
       analyzeStep = Number(button.dataset.step);
       renderAnalyze();
     };
   });
+  setAnalyzeSnippet();
+}
+
+function indexedTokens(data) {
+  if (analyzeStep < 0) {
+    const text = data.text ?? "";
+    return text === "" ? [] : [text];
+  }
+  return sortTokens(data.stages?.[analyzeStep]?.tokens || []);
+}
+
+function sortTokens(tokens) {
+  return [...(tokens || [])].sort((a, b) =>
+      a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }));
 }
 
 function tokenColumn(tokens, previous) {
@@ -378,16 +417,74 @@ function diffChars(from, to) {
 const TOKEN_PALETTE = ["#c8f27a", "#7eb6d9", "#f2cc8f", "#e5989b", "#c9a0dc", "#80cbc4", "#ffab91"];
 
 function coloredTokens(tokens) {
-  return (tokens || []).map((tok, i) => {
+  return sortTokens(tokens).map((tok, i) => {
     const color = TOKEN_PALETTE[i % TOKEN_PALETTE.length];
     return `<span class="tok-pill" style="--tok:${color}">${escapeHtml(tok)}</span>`;
   }).join(`<span class="tok-sep"> · </span>`);
 }
 
+function cardDash(value) {
+  if (value == null) return "—";
+  const text = String(value).trim();
+  return text === "" ? "—" : text;
+}
+
+function formatBpm(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return Number.isInteger(n) ? n.toFixed(1) : String(n);
+}
+
+function formatYear(value) {
+  const n = Number(value);
+  return n > 0 ? String(n) : "—";
+}
+
+function starRow(rating) {
+  const n = Math.max(0, Math.min(5, Number(rating) || 0));
+  let html = `<span class="stars" aria-label="${n} of 5">`;
+  for (let i = 1; i <= 5; i++) {
+    html += `<i class="fa-${i <= n ? "solid" : "regular"} fa-star" aria-hidden="true"></i>`;
+  }
+  return html + "</span>";
+}
+
+function keyBadge(key) {
+  const code = cardDash(key);
+  return code === "—" ? "—" : `<span class="key-badge">${escapeHtml(code)}</span>`;
+}
+
+function renderTrackCard(data) {
+  const card = document.getElementById("track-card");
+  if (!card) return;
+  card.hidden = false;
+  const art = document.getElementById("track-card-art");
+  art.alt = `${data.artist || ""} — ${data.title || ""}`;
+  art.style.visibility = "visible";
+  art.onerror = () => {
+    art.style.visibility = "hidden";
+  };
+  art.src = "/tracks/" + encodeURIComponent(data.id) + ".jpg";
+  document.getElementById("track-card-title").textContent = data.title || "";
+  const rows = [
+    ["Artist", escapeHtml(cardDash(data.artist))],
+    ["Genre", escapeHtml(cardDash(data.genre))],
+    ["BPM", escapeHtml(formatBpm(data.bpm))],
+    ["Key", keyBadge(data.key)],
+    ["Rating", starRow(data.rating)],
+    ["Year", escapeHtml(formatYear(data.year))],
+    ["Album", escapeHtml(cardDash(data.album))],
+    ["Label", escapeHtml(cardDash(data.label))],
+    ["Comment", escapeHtml(cardDash(data.comment))]
+  ];
+  document.getElementById("track-card-meta").innerHTML = rows.map(([label, value]) =>
+      `<dt>${label}</dt><dd>${value}</dd>`).join("");
+}
+
 function mapRole(field) {
   let role = escapeHtml(field.role || "");
   role = role.replace(
-      /numericValue\(\) = (\d+)/,
+      /numericValue\(\) = (0x[0-9A-Fa-f]+)/,
       "numericValue() = <span class=\"ieee\">$1</span>");
   if (field.tokenized && field.tokens && field.tokens.length) {
     role += " · " + coloredTokens(field.tokens);
@@ -408,6 +505,7 @@ async function runMap() {
   if (select) {
     select.value = data.id;
   }
+  renderTrackCard(data);
   setCues([]);
   const groups = mapFieldGroups(data.fields);
   setSnippet(mapSnippet(groups));
@@ -442,6 +540,37 @@ async function runIndex() {
         <span class="score">×${p.freq}</span>
         <span>${escapeHtml(p.artist)} — ${escapeHtml(p.title)}</span>
       </div>`).join("") : `<p class="muted">no postings</p>`}`);
+}
+
+function analyzeSnippetLines(text) {
+  return [
+    { code: "Analyzer analyzer = new Analyzer() {" },
+    { code: "  @Override" },
+    { code: "  protected TokenStreamComponents createComponents(String fieldName) {" },
+    { code: "    Tokenizer source = new StandardTokenizer();", step: 0 },
+    { code: "    TokenStream filter = new LowerCaseFilter(source);", step: 1 },
+    { code: "    filter = new ASCIIFoldingFilter(filter);", step: 2 },
+    { code: "    return new TokenStreamComponents(source, filter);" },
+    { code: "  }" },
+    { code: "};" },
+    { code: "// TokenFilter has no analyze(String) — it only wraps a TokenStream." },
+    { code: "// Analyzer.tokenStream(field, text) is how Lucene runs that chain." },
+    { code: `TokenStream ts = analyzer.tokenStream("title", ${javaString(text ?? "")});` }
+  ];
+}
+
+function setAnalyzeSnippet() {
+  const text = document.getElementById("text")?.value ?? "";
+  const html = analyzeSnippetLines(text).map((line) => {
+    const on = line.step === analyzeStep;
+    return `<span class="java-line${on ? " is-on" : ""}">${highlightJava(line.code)}</span>`;
+  }).join("");
+  document.getElementById("snippet").innerHTML = html;
+  document.querySelector("#snippet .java-line.is-on")?.scrollIntoView({ block: "nearest" });
+}
+
+function analyzeSnippet(text) {
+  return analyzeSnippetLines(text).map((line) => line.code).join("\n");
 }
 
 function javaString(value) {
@@ -734,7 +863,10 @@ async function runFacets() {
     body: JSON.stringify({ q, drillGenre })
   });
   setCues(q ? q.split(/\s+/) : []);
+  setSnippet(facetsSnippet(data.rewrite));
   readout(`
+    <h3>FacetsConfig.build</h3>
+    ${facetRewriteHtml(data.rewrite)}
     <h3>${data.drillSideways ? "DrillSideways" : "FacetsCollector"}</h3>
     <p class="muted">${escapeHtml(data.query)}</p>
     ${data.dims.map((dim) => `
@@ -745,6 +877,56 @@ async function runFacets() {
           <span>${bucket.count}</span>
         </div>`).join("")}
     `).join("")}`);
+}
+
+function facetRewriteHtml(rewrite) {
+  const before = rewrite?.before || [];
+  const after = rewrite?.after || [];
+  if (!before.length && !after.length) {
+    return "";
+  }
+  const row = (field) => `
+    <div class="bucket">
+      <span>${escapeHtml(field.name)} <span class="muted">${escapeHtml(field.luceneType)}</span></span>
+      <span>${escapeHtml(field.value || "∅")}</span>
+    </div>
+    <p class="muted">${escapeHtml(field.role || "")}</p>`;
+  return `
+    <div class="facet-rewrite">
+      <p class="muted">Ultra Naté · page 2 field → indexed $facets</p>
+      ${before.map(row).join("")}
+      <div class="bbl-down">↓</div>
+      ${after.map(row).join("")}
+    </div>`;
+}
+
+function facetCtor(field) {
+  if (field.luceneType === "SortedSetDocValuesFacetField") {
+    return `new SortedSetDocValuesFacetField(${javaString(field.name)}, ${javaString(field.value)})`;
+  }
+  if (field.luceneType === "SortedSetDocValuesField") {
+    return `new SortedSetDocValuesField(${javaString(field.name)}, new BytesRef(${javaString(field.value)}))`;
+  }
+  return `new ${field.luceneType}(${javaString(field.name)}, ${javaString(field.value)}, Store.NO)`;
+}
+
+function facetsSnippet(rewrite) {
+  const lines = ["// Index time (page 3): FacetsConfig.build rewrites the page-2 facet field."];
+  for (const field of rewrite?.before || []) {
+    lines.push(`// ${facetCtor(field)}`);
+  }
+  if ((rewrite?.before || []).length && (rewrite?.after || []).length) {
+    lines.push("// ↓");
+  }
+  for (const field of rewrite?.after || []) {
+    lines.push(`// ${facetCtor(field)}`);
+  }
+  lines.push("FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)");
+  lines.push("    .facetsCollector();");
+  lines.push("Facets genres = new SortedSetDocValuesFacetCounts(state, fc);");
+  lines.push("Facets bpm = new DoubleRangeFacetCounts(\"bpm\", fc, bpmRanges());");
+  lines.push("new DrillSideways(searcher, config, state).search(drillDown, 1);");
+  return lines.join("\n");
 }
 
 function show(name) {

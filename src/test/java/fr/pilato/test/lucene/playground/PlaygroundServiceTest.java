@@ -91,6 +91,17 @@ class PlaygroundServiceTest {
     void map_indexesReferenceTrack() {
         var mapped = service.map(PlaygroundService.REFERENCE_ID);
         assertThat(mapped.title()).isEqualTo("Free (Bob Sinclar Remix)");
+        assertThat(mapped.artist()).isEqualTo("Ultra Naté");
+        assertThat(mapped.genre()).isEqualTo("Club");
+        assertThat(mapped.key()).isEqualTo("4B");
+        assertThat(mapped.bpm()).isEqualTo(128.0);
+        assertThat(mapped.rating()).isEqualTo(3);
+        assertThat(PlaygroundService.class.getResource("/public/tracks/" + PlaygroundService.AROUND_THE_WORLD_ID + ".jpg"))
+                .isNotNull();
+        assertThat(PlaygroundService.class.getResource("/public/tracks/" + PlaygroundService.REFERENCE_ID + ".jpg"))
+                .isNotNull();
+        assertThat(PlaygroundService.class.getResource("/public/tracks/" + PlaygroundService.CETTE_ANNEE_LA_ID + ".jpg"))
+                .isNotNull();
         assertThat(mapped.picks())
                 .extracting(PlaygroundModels.TrackPick::id, PlaygroundModels.TrackPick::label)
                 .containsExactly(
@@ -102,7 +113,7 @@ class PlaygroundServiceTest {
                     assertThat(field.name()).isEqualTo("title");
                     assertThat(field.luceneType()).isEqualTo("TextField");
                     assertThat(field.tokenized()).isTrue();
-                    assertThat(field.tokens()).contains("free", "bob", "sinclar", "remix");
+                    assertThat(field.tokens()).containsExactly("bob", "free", "remix", "sinclar");
                 })
                 .anySatisfy(field -> {
                     assertThat(field.name()).isEqualTo("genre.raw.normalized");
@@ -115,8 +126,30 @@ class PlaygroundServiceTest {
                     assertThat(field.role())
                             .startsWith("numeric range + facets")
                             .contains("IEEE 754")
-                            .contains("numericValue() = " + Double.doubleToLongBits(128.0));
-                });
+                            .contains("numericValue() = 0x" + Long.toHexString(Double.doubleToLongBits(128.0)).toUpperCase());
+                })
+                .anySatisfy(field -> {
+                    assertThat(field.luceneType()).isEqualTo("SortedSetDocValuesFacetField");
+                    assertThat(field.name()).isEqualTo("genre");
+                    assertThat(field.value()).isEqualTo("Club");
+                    assertThat(field.role()).isEqualTo("facet dimension");
+                })
+                .noneMatch(field -> "dummy".equals(field.name()) || "dummy".equals(field.value()));
+    }
+
+    @Test
+    void map_sortsAnalyzedTokensAlphanumerically() {
+        var mapped = service.map(PlaygroundService.CETTE_ANNEE_LA_ID);
+        assertThat(mapped.fields())
+                .filteredOn(field -> "title".equals(field.name()) && field.tokenized())
+                .extracting(PlaygroundModels.MappedField::tokens)
+                .containsExactly(List.of("annee", "cette", "la"));
+        assertThat(mapped.fields())
+                .filteredOn(field -> "bpm".equals(field.name()))
+                .extracting(PlaygroundModels.MappedField::role)
+                .first()
+                .asString()
+                .contains("numericValue() = 0x405BB9999999999A");
     }
 
     @Test
@@ -185,6 +218,26 @@ class PlaygroundServiceTest {
         assertThat(drilled.drillSideways()).isTrue();
         assertThat(count(drilled, "genre", "Dance")).isGreaterThan(0);
         assertThat(count(drilled, "bpm", "120 – 130")).isLessThan(52);
+    }
+
+    @Test
+    void facets_showsFacetsConfigRewrite() throws Exception {
+        var rewrite = service.facets("Bob", "").rewrite();
+        assertThat(rewrite.before())
+                .extracting(
+                        PlaygroundModels.FacetRewriteLine::luceneType,
+                        PlaygroundModels.FacetRewriteLine::name,
+                        PlaygroundModels.FacetRewriteLine::value)
+                .containsExactly(tuple("SortedSetDocValuesFacetField", "genre", "Club"));
+        assertThat(rewrite.after())
+                .extracting(
+                        PlaygroundModels.FacetRewriteLine::luceneType,
+                        PlaygroundModels.FacetRewriteLine::name,
+                        PlaygroundModels.FacetRewriteLine::value)
+                .containsExactly(
+                        tuple("SortedSetDocValuesField", "$facets", "genre\\u001FClub"),
+                        tuple("StringField", "$facets", "genre\\u001FClub"),
+                        tuple("StringField", "$facets", "genre"));
     }
 
     private static long count(PlaygroundModels.FacetsResponse response, String dim, String label) {

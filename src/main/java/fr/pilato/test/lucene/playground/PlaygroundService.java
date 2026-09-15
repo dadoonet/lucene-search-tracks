@@ -10,6 +10,8 @@ import fr.pilato.test.lucene.TrackSearchIndex;
 import fr.pilato.test.lucene.TrackSuggestion;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredValue;
+import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
+import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.DrillDownQuery;
 import org.apache.lucene.facet.DrillSideways;
 import org.apache.lucene.facet.FacetResult;
@@ -47,6 +49,8 @@ import static fr.pilato.test.lucene.playground.PlaygroundModels.AnalyzeResponse;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.AnalyzeStage;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetBucket;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetDim;
+import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetRewrite;
+import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetRewriteLine;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetsResponse;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.IndexResponse;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.MapResponse;
@@ -130,24 +134,38 @@ public final class PlaygroundService implements AutoCloseable {
         Document doc = TrackDocumentMapper.toDocument(track);
         List<MappedField> fields = new ArrayList<>();
         for (IndexableField field : doc.getFields()) {
+            String type = field.getClass().getSimpleName();
+            String name = field.name();
             String value = stored(field);
+            if (field instanceof SortedSetDocValuesFacetField facet) {
+                name = facet.dim;
+                value = String.join("/", facet.path);
+            }
             boolean tokenized = field.fieldType().tokenized();
-            List<String> tokens = tokenized ? TrackAnalyzers.tokenize(value) : List.of();
-            String role = role(field.name(), field.getClass().getSimpleName());
+            List<String> tokens = tokenized
+                    ? TrackAnalyzers.tokenize(value).stream().sorted(String.CASE_INSENSITIVE_ORDER).toList()
+                    : List.of();
+            String role = role(name, type);
             String ieee = ieeeNote(field);
             if (!ieee.isEmpty()) {
                 role = role + " · " + ieee;
             }
-            fields.add(new MappedField(
-                    field.name(),
-                    field.getClass().getSimpleName(),
-                    tokenized,
-                    value,
-                    tokens,
-                    role));
+            fields.add(new MappedField(name, type, tokenized, value, tokens, role));
         }
         return new MapResponse(
-                track.id(), track.title(), track.artist(), List.copyOf(fields), mapPicks());
+                track.id(),
+                track.title(),
+                track.artist(),
+                track.genre(),
+                track.key(),
+                track.bpm(),
+                track.rating(),
+                track.year(),
+                track.album(),
+                track.label(),
+                track.comment(),
+                List.copyOf(fields),
+                mapPicks());
     }
 
     private List<TrackPick> mapPicks() {
@@ -313,7 +331,8 @@ public final class PlaygroundService implements AutoCloseable {
                             dim("genre", "🏷️", children(facets.getAllChildren(TrackFacets.GENRE), 12)),
                             dim("bpm", "⏱", children(facets.getAllChildren(TrackDocumentMapper.BPM), 16)),
                             dim("rating", "⭐", children(facets.getAllChildren(TrackDocumentMapper.RATING), 6)),
-                            dim("year", "📅", decades(facets.getAllChildren(TrackDocumentMapper.YEAR)))));
+                            dim("year", "📅", decades(facets.getAllChildren(TrackDocumentMapper.YEAR)))),
+                    facetRewrite());
         }
     }
 
@@ -335,6 +354,50 @@ public final class PlaygroundService implements AutoCloseable {
         byDim.put(TrackDocumentMapper.YEAR, new LongValueFacetCounts(
                 TrackDocumentMapper.YEAR, collector));
         return new MultiFacets(byDim);
+    }
+
+    private FacetRewrite facetRewrite() throws IOException {
+        Track track = byId.get(REFERENCE_ID);
+        if (track == null) {
+            return new FacetRewrite(List.of(), List.of());
+        }
+        Document before = TrackDocumentMapper.toDocument(track);
+        Document after = TrackFacets.config().build(before);
+        return new FacetRewrite(facetRewriteLines(before), facetRewriteLines(after));
+    }
+
+    private static List<FacetRewriteLine> facetRewriteLines(Document doc) {
+        List<FacetRewriteLine> lines = new ArrayList<>();
+        for (IndexableField field : doc.getFields()) {
+            if (field instanceof SortedSetDocValuesFacetField facet) {
+                lines.add(new FacetRewriteLine(
+                        "SortedSetDocValuesFacetField",
+                        facet.dim,
+                        String.join("/", facet.path),
+                        "page 2"));
+                continue;
+            }
+            if (!FacetsConfig.DEFAULT_INDEX_FIELD_NAME.equals(field.name())) {
+                continue;
+            }
+            String type = field.getClass().getSimpleName();
+            String role = "SortedSetDocValuesField".equals(type) ? "counts" : "drill-down";
+            lines.add(new FacetRewriteLine(type, field.name(), facetFieldValue(field), role));
+        }
+        return List.copyOf(lines);
+    }
+
+    private static String facetFieldValue(IndexableField field) {
+        String text = field.stringValue();
+        if (text != null) {
+            return visibleDelim(text);
+        }
+        BytesRef binary = field.binaryValue();
+        return binary == null ? "" : visibleDelim(binary.utf8ToString());
+    }
+
+    private static String visibleDelim(String value) {
+        return value.replace(String.valueOf(FacetsConfig.DELIM_CHAR), "\\u001F");
     }
 
     private static FacetDim dim(String name, String emoji, List<FacetBucket> buckets) {
@@ -415,7 +478,8 @@ public final class PlaygroundService implements AutoCloseable {
         if (bits == null) {
             return "packed as IEEE 754 bits — read storedValue().getDoubleValue()";
         }
-        return "packed as IEEE 754 bits (numericValue() = " + bits + ")";
+        return "packed as IEEE 754 bits (numericValue() = 0x"
+                + Long.toHexString(bits.longValue()).toUpperCase() + ")";
     }
 
     private static String role(String name, String luceneType) {
