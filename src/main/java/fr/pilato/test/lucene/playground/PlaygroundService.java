@@ -37,6 +37,7 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.RamUsageEstimator;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static fr.pilato.test.lucene.playground.PlaygroundModels.AnalyzeResponse;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.AnalyzeStage;
@@ -82,25 +84,32 @@ public final class PlaygroundService implements AutoCloseable {
     private final List<Track> corpus;
     private final Map<String, Track> byId;
     private final TrackSearchIndex index;
+    private final String heapSize;
+    private final long builtInMs;
 
-    public PlaygroundService(List<Track> corpus, TrackSearchIndex index) {
+    public PlaygroundService(List<Track> corpus, TrackSearchIndex index, String heapSize, long builtInMs) {
         this.corpus = List.copyOf(corpus);
         this.byId = new LinkedHashMap<>();
         for (Track track : this.corpus) {
             this.byId.put(track.id(), track);
         }
         this.index = index;
+        this.heapSize = heapSize;
+        this.builtInMs = builtInMs;
     }
 
     public static PlaygroundService boot() throws IOException {
         List<Track> corpus = TrackDatasetLoader.load();
         TrackSearchIndex index = new TrackSearchIndex();
+        long start = System.nanoTime();
         index.rebuild(corpus);
-        return new PlaygroundService(corpus, index);
+        long builtInMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        String heapSize = RamUsageEstimator.humanReadableUnits(index.ramBytesUsed()).trim();
+        return new PlaygroundService(corpus, index, heapSize, builtInMs);
     }
 
     public MetaResponse meta() {
-        return new MetaResponse(corpus.size(), index.numDocs(), "ByteBuffersDirectory");
+        return new MetaResponse(index.numDocs(), "ByteBuffersDirectory", heapSize, builtInMs);
     }
 
     public AnalyzeResponse analyze(String text) {

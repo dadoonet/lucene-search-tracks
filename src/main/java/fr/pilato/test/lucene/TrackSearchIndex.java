@@ -115,6 +115,20 @@ public final class TrackSearchIndex implements AutoCloseable {
         }
     }
 
+    public long ramBytesUsed() throws IOException {
+        synchronized (writeLock) {
+            return sizeOf(directory) + sizeOf(suggestionDirectory);
+        }
+    }
+
+    private static long sizeOf(Directory directory) throws IOException {
+        long bytes = 0L;
+        for (String name : directory.listAll()) {
+            bytes += directory.fileLength(name);
+        }
+        return bytes;
+    }
+
     @Override
     public void close() throws IOException {
         synchronized (writeLock) {

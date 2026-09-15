@@ -2,6 +2,7 @@ package fr.pilato.test.lucene.playground;
 
 import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
+import org.apache.lucene.util.Version;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -96,7 +97,8 @@ public final class PlaygroundApp {
             if (in == null) {
                 throw new IllegalStateException("Missing classpath resource /public/index.html");
             }
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8)
+                    .replace("{{lucene.version}}", Version.LATEST.toString());
         }
     }
 }

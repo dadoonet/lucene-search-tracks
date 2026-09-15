@@ -112,5 +112,5 @@ public final class PlaygroundModels {
 
     public record FacetsRequest(String q, String drillGenre) {}
 
-    public record MetaResponse(int corpusSize, int numDocs, String directory) {}
+    public record MetaResponse(int numDocs, String directory, String heapSize, long builtInMs) {}
 }

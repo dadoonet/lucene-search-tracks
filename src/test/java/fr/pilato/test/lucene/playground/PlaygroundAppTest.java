@@ -1,6 +1,7 @@
 package fr.pilato.test.lucene.playground;
 
 import io.javalin.testtools.JavalinTest;
+import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,19 @@ class PlaygroundAppTest {
     }
 
     @Test
+    void meta_reportsHeapSizeAndBuildTime() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/api/meta");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains("\"directory\":\"ByteBuffersDirectory\"")
+                    .contains("\"heapSize\":")
+                    .contains("\"builtInMs\":")
+                    .doesNotContain("corpusSize");
+        });
+    }
+
+    @Test
     void home_servesPlayground() {
         JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
             var response = client.get("/");
@@ -43,7 +57,8 @@ class PlaygroundAppTest {
             assertThat(response.body().string())
                     .contains("Lucene playground")
                     .contains("lang=\"en\"")
-                    .contains("Maven tests remain the contract");
+                    .contains("Built on Lucene " + Version.LATEST)
+                    .contains("href=\"https://david.pilato.fr/\">David Pilato</a>");
         });
     }
 }

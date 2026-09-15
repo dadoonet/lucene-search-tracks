@@ -23,8 +23,7 @@ const chapters = {
     return new TokenStreamComponents(source, filter);
   }
 };
-// TokenFilter has no analyze(String) — it only wraps a TokenStream.
-// Analyzer.tokenStream(field, text) is how Lucene runs that chain.
+// Analyze a text
 TokenStream ts = analyzer.tokenStream("title", "Around The World");`,
     render(root) {
       analyzeStep = -1;
@@ -79,15 +78,28 @@ doc.add(new SortedSetDocValuesFacetField("genre", "Club"));`,
     kicker: "Part 2 · ByteBuffersDirectory",
     title: "Inverted index",
     lede: "The term is no longer in the title — the title is in the term. Type a token, read the posting list.",
-    snippet: `Directory dir = new ByteBuffersDirectory();
+    snippet: `// We will use an in-memory index
+Directory dir = new ByteBuffersDirectory();
+
+// Create the index writer with the analyzer
 IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
-// Same Document as page 2.
-Document doc = mapper.toDocument(track);
-FacetsConfig facetsConfig = new FacetsConfig();
-// more on this at 6 — Facets
-writer.addDocument(facetsConfig.build(doc));
-writer.commit();
-IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));`,
+
+// Create Lucene doc for track #255465792: Ultra Naté - Free (Bob Sinclar Remix)
+Document doc255465792 = mapper.toDocument(Tracks.trackFrom(255465792));
+// Add the document to the index. This could have been:
+// writer.addDocument(doc255465792);
+writer.addDocument(facetsConfig.build(doc255465792));
+
+// Index track #172523747: Daft Punk - Around The World
+Document doc172523747 = mapper.toDocument(Tracks.trackFrom(172523747));
+writer.addDocument(facetsConfig.build(doc172523747));
+
+// Index track #106352474: Claude François - Cette année-là
+Document doc106352474 = mapper.toDocument(Tracks.trackFrom(106352474));
+writer.addDocument(facetsConfig.build(doc106352474));
+
+// Commit all the documents that have been indexed so far
+writer.commit();`,
     render(root) {
       root.innerHTML = `
         <div class="controls">
@@ -123,7 +135,8 @@ IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));`,
     kicker: "Part 3 · BooleanQuery",
     title: "Search",
     lede: "Each analyzed token is a SHOULD across fields. The last token also gets a PrefixQuery. FILTER and MUST_NOT wrap that BooleanQuery.",
-    snippet: `BooleanQuery.Builder bqb = new BooleanQuery.Builder();
+    snippet: `IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
+BooleanQuery.Builder bqb = new BooleanQuery.Builder();
 bqb.add(new BoostQuery(new TermQuery(new Term("title", "bob")), 4.0f), BooleanClause.Occur.SHOULD);
 bqb.add(new BoostQuery(new PrefixQuery(new Term("title", "bob")), 1.0f), BooleanClause.Occur.SHOULD);
 bqb.setMinimumNumberShouldMatch(1);
@@ -465,20 +478,81 @@ function renderTrackCard(data) {
     art.style.visibility = "hidden";
   };
   art.src = "/tracks/" + encodeURIComponent(data.id) + ".jpg";
-  document.getElementById("track-card-title").textContent = data.title || "";
+  const titleEl = document.getElementById("track-card-title");
+  titleEl.dataset.mapRoot = "title";
+  titleEl.textContent = data.title || "";
   const rows = [
-    ["Artist", escapeHtml(cardDash(data.artist))],
-    ["Genre", escapeHtml(cardDash(data.genre))],
-    ["BPM", escapeHtml(formatBpm(data.bpm))],
-    ["Key", keyBadge(data.key)],
-    ["Rating", starRow(data.rating)],
-    ["Year", escapeHtml(formatYear(data.year))],
-    ["Album", escapeHtml(cardDash(data.album))],
-    ["Label", escapeHtml(cardDash(data.label))],
-    ["Comment", escapeHtml(cardDash(data.comment))]
+    ["artist", "Artist", escapeHtml(cardDash(data.artist))],
+    ["genre", "Genre", escapeHtml(cardDash(data.genre))],
+    ["bpm", "BPM", escapeHtml(formatBpm(data.bpm))],
+    ["key", "Key", keyBadge(data.key)],
+    ["rating", "Rating", starRow(data.rating)],
+    ["year", "Year", escapeHtml(formatYear(data.year))],
+    ["album", "Album", escapeHtml(cardDash(data.album))],
+    ["label", "Label", escapeHtml(cardDash(data.label))],
+    ["comment", "Comment", escapeHtml(cardDash(data.comment))]
   ];
-  document.getElementById("track-card-meta").innerHTML = rows.map(([label, value]) =>
-      `<dt>${label}</dt><dd>${value}</dd>`).join("");
+  document.getElementById("track-card-meta").innerHTML = rows.map(([root, label, value]) =>
+      `<div class="track-card-row" data-map-root="${root}"><dt>${label}</dt><dd>${value}</dd></div>`).join("");
+}
+
+function bindMapHover() {
+  bindMapHoverZone(document.getElementById("track-card"), "card");
+  bindMapHoverZone(document.getElementById("snippet"), "snippet");
+  bindMapHoverZone(document.getElementById("readout"), "readout");
+}
+
+function bindMapHoverZone(zone, origin) {
+  if (!zone) return;
+  zone.onpointerover = (event) => {
+    const host = event.target.closest("[data-map-root]");
+    setMapHover(host && zone.contains(host) ? host.dataset.mapRoot : null, origin);
+  };
+  zone.onpointerleave = () => setMapHover(null);
+}
+
+function setMapHover(root, origin) {
+  document.querySelectorAll("#track-card [data-map-root]").forEach((el) => {
+    el.classList.toggle("is-on", Boolean(root) && el.dataset.mapRoot === root);
+  });
+  document.querySelectorAll("#snippet .java-line[data-map-root]").forEach((el) => {
+    el.classList.toggle("is-on", Boolean(root) && el.dataset.mapRoot === root);
+  });
+  document.querySelectorAll("#readout .map-group[data-map-root]").forEach((el) => {
+    el.classList.toggle("is-on", Boolean(root) && el.dataset.mapRoot === root);
+  });
+  if (!root) return;
+  if (origin !== "snippet") {
+    const lines = [...document.querySelectorAll("#snippet .java-line.is-on")];
+    scrollIntoPanel(document.getElementById("snippet")?.closest(".panel"), lines[0], lines.at(-1));
+  }
+  if (origin !== "readout") {
+    scrollIntoPanel(
+        document.getElementById("readout"),
+        document.querySelector("#readout .map-group.is-on"));
+  }
+  if (origin !== "card") {
+    scrollIntoPanel(
+        document.getElementById("track-card")?.closest(".panel"),
+        document.querySelector("#track-card [data-map-root].is-on"));
+  }
+}
+
+function scrollIntoPanel(panel, start, end = start) {
+  if (!panel || !start) return;
+  const box = panel.getBoundingClientRect();
+  const pad = 10;
+  const top = start.getBoundingClientRect().top;
+  const bottom = (end || start).getBoundingClientRect().bottom;
+  if (top < box.top + pad) {
+    panel.scrollTop -= box.top + pad - top;
+  } else if (bottom > box.bottom - pad) {
+    panel.scrollTop += bottom - (box.bottom - pad);
+    const again = start.getBoundingClientRect().top;
+    if (again < box.top + pad) {
+      panel.scrollTop -= box.top + pad - again;
+    }
+  }
 }
 
 function mapRole(field) {
@@ -508,11 +582,11 @@ async function runMap() {
   renderTrackCard(data);
   setCues([]);
   const groups = mapFieldGroups(data.fields);
-  setSnippet(mapSnippet(groups));
+  setMapSnippet(groups);
   readout(`
     <h3>${escapeHtml(data.artist)} — ${escapeHtml(data.title)}</h3>
     ${groups.map((group) => `
-      <div class="map-group">
+      <div class="map-group" data-map-root="${escapeAttr(group.root)}">
         ${group.fields.map((field) => `
           <div class="bucket">
             <span>${escapeHtml(field.name)} <span class="muted">${escapeHtml(field.luceneType)}</span></span>
@@ -521,6 +595,7 @@ async function runMap() {
           <p class="muted">${mapRole(field)}</p>
         `).join("")}
       </div>`).join("")}`);
+  bindMapHover();
 }
 
 async function runIndex() {
@@ -553,8 +628,7 @@ function analyzeSnippetLines(text) {
     { code: "    return new TokenStreamComponents(source, filter);" },
     { code: "  }" },
     { code: "};" },
-    { code: "// TokenFilter has no analyze(String) — it only wraps a TokenStream." },
-    { code: "// Analyzer.tokenStream(field, text) is how Lucene runs that chain." },
+    { code: "// Analyze a text" },
     { code: `TokenStream ts = analyzer.tokenStream("title", ${javaString(text ?? "")});` }
   ];
 }
@@ -582,6 +656,10 @@ function javaDouble(n) {
   return s.includes(".") ? s : s + ".0";
 }
 
+const MAP_FIELD_ORDER = [
+  "id", "title", "artist", "genre", "bpm", "key", "rating", "year", "album", "label", "comment"
+];
+
 function mapFieldRoot(field) {
   if (field.luceneType === "SortedSetDocValuesFacetField") {
     return "genre";
@@ -592,7 +670,6 @@ function mapFieldRoot(field) {
 }
 
 function mapFieldGroups(fields) {
-  const groups = [];
   const byRoot = new Map();
   for (const field of fields || []) {
     const root = mapFieldRoot(field);
@@ -600,11 +677,15 @@ function mapFieldGroups(fields) {
     if (!group) {
       group = { root, fields: [] };
       byRoot.set(root, group);
-      groups.push(group);
     }
     group.fields.push(field);
   }
-  return groups;
+  return [...byRoot.values()].sort((a, b) => mapFieldRank(a.root) - mapFieldRank(b.root));
+}
+
+function mapFieldRank(root) {
+  const index = MAP_FIELD_ORDER.indexOf(root);
+  return index === -1 ? MAP_FIELD_ORDER.length : index;
 }
 
 function mapGroupComment(root) {
@@ -632,38 +713,55 @@ function mapGroupComment(root) {
   }
 }
 
-function mapSnippet(groups) {
-  const lines = ["Document doc = new Document();"];
+function mapSnippetLines(groups) {
+  const lines = [{ code: "Document doc = new Document();" }];
   const genre = groups.flatMap((group) => group.fields)
       .find((field) => field.name === "genre")?.value || "";
   groups.forEach((group, index) => {
     if (index > 0) {
-      lines.push("");
+      lines.push({ code: "" });
     }
     const comment = mapGroupComment(group.root);
     if (comment) {
-      lines.push(`// ${comment}`);
+      lines.push({ code: `// ${comment}`, root: group.root });
     }
     for (const field of group.fields) {
       if (field.luceneType === "SortedSetDocValuesFacetField") {
         if (genre) {
-          lines.push(`doc.add(new SortedSetDocValuesFacetField("genre", ${javaString(genre)}));`);
+          lines.push({
+            code: `doc.add(new SortedSetDocValuesFacetField("genre", ${javaString(genre)}));`,
+            root: group.root
+          });
         }
         continue;
       }
       const name = javaString(field.name);
+      let code;
       if (field.luceneType === "DoubleField") {
         const n = Number(field.value);
-        lines.push(`doc.add(new DoubleField(${name}, ${Number.isFinite(n) ? javaDouble(n) : "0.0"}, Store.YES));`);
+        code = `doc.add(new DoubleField(${name}, ${Number.isFinite(n) ? javaDouble(n) : "0.0"}, Store.YES));`;
       } else if (field.luceneType === "IntField") {
         const n = Number(field.value);
-        lines.push(`doc.add(new IntField(${name}, ${Number.isFinite(n) ? n : 0}, Store.YES));`);
+        code = `doc.add(new IntField(${name}, ${Number.isFinite(n) ? n : 0}, Store.YES));`;
       } else {
-        lines.push(`doc.add(new ${field.luceneType}(${name}, ${javaString(field.value ?? "")}, Store.YES));`);
+        code = `doc.add(new ${field.luceneType}(${name}, ${javaString(field.value ?? "")}, Store.YES));`;
       }
+      lines.push({ code, root: group.root });
     }
   });
-  return lines.join("\n");
+  return lines;
+}
+
+function mapSnippet(groups) {
+  return mapSnippetLines(groups).map((line) => line.code).join("\n");
+}
+
+function setMapSnippet(groups) {
+  const html = mapSnippetLines(groups).map((line) => {
+    const root = line.root ? ` data-map-root="${escapeAttr(line.root)}"` : "";
+    return `<span class="java-line"${root}>${highlightJava(line.code)}</span>`;
+  }).join("");
+  document.getElementById("snippet").innerHTML = html;
 }
 
 function javaFloat(n) {
@@ -711,7 +809,10 @@ function searchSnippet(tokens, genre, minus, explainDoc) {
   const terms = (tokens || []).filter(Boolean);
   const genreValue = (genre || "").trim();
   const keys = (minus || "").trim() ? minus.split(/\s*,\s*/).filter(Boolean) : [];
-  const lines = [];
+  const lines = [
+    "IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));",
+    ""
+  ];
   const explain = explainDoc == null ? "hits.scoreDocs[0].doc" : String(Number(explainDoc));
   let declared = false;
 
@@ -949,7 +1050,7 @@ document.querySelectorAll(".chapters button").forEach((button) => {
 
 getJson("/api/meta").then((meta) => {
   document.getElementById("meta").textContent =
-      `${meta.numDocs} docs · ${meta.directory} · corpus ${meta.corpusSize}`;
+      `${meta.numDocs} docs · ${meta.directory} · size in heap ${meta.heapSize} · built in ${meta.builtInMs} ms`;
 }).catch((error) => {
   document.getElementById("meta").textContent = error.message;
 });
