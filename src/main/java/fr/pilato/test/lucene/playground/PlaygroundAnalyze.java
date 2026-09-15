@@ -1,8 +1,8 @@
 package fr.pilato.test.lucene.playground;
 
-import fr.pilato.test.lucene.lucene.TrackAnalyzers;
-import fr.pilato.test.lucene.lucene.TrackAnalyzers.AnalyzedToken;
-import fr.pilato.test.lucene.lucene.TrackAnalyzers.Stage;
+import fr.pilato.test.lucene.lucene.helpers.TrackAnalyzers;
+import fr.pilato.test.lucene.lucene.helpers.TrackAnalyzers.AnalyzedToken;
+import fr.pilato.test.lucene.lucene.helpers.TrackAnalyzers.Stage;
 
 import java.util.ArrayList;
 import java.util.List;

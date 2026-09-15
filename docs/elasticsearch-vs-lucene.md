@@ -2,7 +2,7 @@
 
 Même `Track` + `tracks.ndjson`. Contrat `TrackSearch` ; le volume de code des **implémentations** reste le contraste.
 
-Lucene : `TrackSearchLucene` (ex-`TrackSearchIndex` + query/facets) + analyzers / mapper / query builder / `TrackFacets`.
+Lucene : `TrackSearchLucene` (ex-`TrackSearchIndex` + query/facets). Analyzers / mapper / query builder / `TrackFacets` vivent dans `lucene.helpers`. `TrackSearchLucene2` est l’équivalent autosuffisant pour le comparatif avec ES.
 Elasticsearch : `TrackSearchElasticsearch` (ex-`TrackElasticsearchIndex`).
 Assertions search / facets / suggest : `TrackSearchContractTest`, joué par `TrackSearchLuceneTest` et `TrackSearchElasticsearchTest`.
 

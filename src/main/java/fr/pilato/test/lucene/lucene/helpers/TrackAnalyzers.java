@@ -1,4 +1,4 @@
-package fr.pilato.test.lucene.lucene;
+package fr.pilato.test.lucene.lucene.helpers;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.LowerCaseFilter;

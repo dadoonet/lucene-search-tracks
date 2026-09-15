@@ -32,8 +32,11 @@ fr.pilato.test.lucene
 
 fr.pilato.test.lucene.lucene
   TrackSearchLucene          (today’s TrackSearchIndex + query/facet wiring)
+  TrackSearchLucene2         (self-contained TrackSearch, for ES comparison)
+
+fr.pilato.test.lucene.lucene.helpers
   TrackAnalyzers, TrackDocumentMapper, TrackLuceneQueryBuilder, TrackFacets
-  Lucene-only tests (mapper, RAM rebuild, Query.toString)
+  Lucene-only helper tests (mapper, Query.toString)
 
 fr.pilato.test.lucene.elasticsearch
   TrackSearchElasticsearch   (today’s TrackElasticsearchIndex)
@@ -118,7 +121,7 @@ Two concrete classes:
 
 `TrackTestLog` stays the emoji narrative for both.
 
-**Stay Lucene-only** (not on the contract class):
+**Stay Lucene-only** (not on the contract class; helpers live in `lucene.helpers`):
 
 - `TrackDocumentMapperTest`
 - RAM rebuild / `numDocs` (`TrackSearchIndexTest` today)

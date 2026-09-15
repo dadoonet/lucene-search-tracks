@@ -1,4 +1,4 @@
-package fr.pilato.test.lucene.lucene;
+package fr.pilato.test.lucene.lucene.helpers;
 
 import fr.pilato.test.lucene.Track;
 import org.apache.lucene.document.Document;

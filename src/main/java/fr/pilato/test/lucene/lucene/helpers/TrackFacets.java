@@ -1,4 +1,4 @@
-package fr.pilato.test.lucene.lucene;
+package fr.pilato.test.lucene.lucene.helpers;
 
 import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.range.DoubleRange;
