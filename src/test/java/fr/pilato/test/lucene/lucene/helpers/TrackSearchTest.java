@@ -4,6 +4,7 @@ import fr.pilato.test.lucene.Track;
 import fr.pilato.test.lucene.TrackDatasetLoader;
 import fr.pilato.test.lucene.TrackHit;
 import fr.pilato.test.lucene.TrackTestLog;
+import fr.pilato.test.lucene.lucene.TrackSearchLucene;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;

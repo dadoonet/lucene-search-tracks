@@ -205,7 +205,7 @@ public final class TrackSearchLucene2 implements TrackSearch {
                         Math.max(SUGGEST_LIMIT, suggester.getCount()));
             }
             List<Lookup.LookupResult> matches =
-                    suggester.lookup(prefix, Set.of(), lookupCount, false, true);
+                    suggester.lookup(prefix, Set.of(), lookupCount, true, true);
             List<TrackSuggestion> result = new ArrayList<>(SUGGEST_LIMIT);
             for (Lookup.LookupResult match : matches) {
                 String field = match.payload != null ? match.payload.utf8ToString() : "";

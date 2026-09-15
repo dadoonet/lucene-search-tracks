@@ -1,5 +1,8 @@
 package fr.pilato.test.lucene;
 
+import fr.pilato.test.lucene.lucene.TrackSearchLucene;
+import fr.pilato.test.lucene.lucene.helpers.TrackDocumentMapper;
+import fr.pilato.test.lucene.lucene.helpers.TrackLuceneQueryBuilder;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
@@ -16,12 +19,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TrackHighlighterTest {
 
     private static List<Track> corpus;
-    private static TrackSearchIndex index;
+    private static TrackSearchLucene index;
 
     @BeforeAll
     static void rebuild() throws Exception {
         corpus = TrackDatasetLoader.load();
-        index = new TrackSearchIndex();
+        index = new TrackSearchLucene();
         index.rebuild(corpus);
     }
 
