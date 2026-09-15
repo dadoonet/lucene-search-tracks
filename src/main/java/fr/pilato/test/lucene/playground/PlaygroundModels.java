@@ -76,7 +76,8 @@ public final class PlaygroundModels {
             int year,
             float score,
             String explain,
-            ExplainNode explainTree) {}
+            ExplainNode explainTree,
+            Map<String, String> highlights) {}
 
     public record SearchResponse(
             String q,

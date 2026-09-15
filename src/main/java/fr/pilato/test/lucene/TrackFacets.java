@@ -5,6 +5,8 @@ import org.apache.lucene.facet.range.DoubleRange;
 
 public final class TrackFacets {
     public static final String GENRE = "genre";
+    /** Rekordbox missing years are 0; junk values like 1 are not real decades. */
+    public static final int YEAR_MIN = 1900;
     private static final FacetsConfig CONFIG = new FacetsConfig();
 
     private TrackFacets() {}
@@ -25,5 +27,41 @@ public final class TrackFacets {
         }
         ranges[15] = new DoubleRange("220+", 220.0, true, Double.POSITIVE_INFINITY, false);
         return ranges;
+    }
+
+    /** Decade label {@code 2020–2029}, or {@code null} when {@code year} is missing/junk. */
+    public static String decadeLabel(int year) {
+        if (year < YEAR_MIN) {
+            return null;
+        }
+        int decade = (year / 10) * 10;
+        return decade + "–" + (decade + 9);
+    }
+
+    /**
+     * Inclusive {@code [from, to]} for a decade chip, or {@code null} when the label is not a
+     * plausible music decade.
+     */
+    public static int[] decadeBounds(String label) {
+        if (label == null || label.isBlank()) {
+            return null;
+        }
+        String[] parts = label.split("–", 2);
+        if (parts.length != 2) {
+            parts = label.split("-", 2);
+        }
+        if (parts.length != 2) {
+            return null;
+        }
+        try {
+            int from = Integer.parseInt(parts[0].trim());
+            int to = Integer.parseInt(parts[1].trim());
+            if (from < YEAR_MIN || to < from) {
+                return null;
+            }
+            return new int[] {from, to};
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

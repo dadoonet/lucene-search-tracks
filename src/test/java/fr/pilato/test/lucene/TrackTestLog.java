@@ -131,6 +131,34 @@ public final class TrackTestLog {
         info("🧬 " + query);
     }
 
+    public static void highlight(String q, List<Map<String, String>> hits) {
+        info("");
+        info("🔦 highlight q=\"" + (q == null ? "" : q) + "\"");
+        if (hits == null || hits.isEmpty()) {
+            info("🫙 no highlights");
+            return;
+        }
+        int shown = Math.min(TOP_HITS, hits.size());
+        for (int i = 0; i < shown; i++) {
+            Map<String, String> fields = hits.get(i);
+            String title = fields.getOrDefault(TrackDocumentMapper.TITLE, "—");
+            String artist = fields.getOrDefault(TrackDocumentMapper.ARTIST, "—");
+            info("   " + (i + 1) + ". 🎤 " + artist + " — 💿 " + title);
+            fields.forEach((field, snippet) -> {
+                if (!TrackDocumentMapper.TITLE.equals(field)
+                        && !TrackDocumentMapper.ARTIST.equals(field)
+                        && snippet != null
+                        && snippet.contains("<b>")) {
+                    info("      · " + field + "  " + snippet);
+                }
+            });
+        }
+        int remaining = hits.size() - shown;
+        if (remaining > 0) {
+            info("   … and " + remaining + " more");
+        }
+    }
+
     public static void facets(String q, List<FacetLine> lines) {
         info("");
         info("📊 facets under q=\"" + q + "\"");

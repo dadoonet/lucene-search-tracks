@@ -10,6 +10,7 @@ import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
@@ -221,16 +222,10 @@ public final class TrackLuceneQueryBuilder {
 
     /** Playground decade labels look like {@code 2020–2029} (en dash). */
     private static Query yearDecade(String label) {
-        String[] parts = label.split("–", 2);
-        if (parts.length != 2) {
-            return null;
+        int[] bounds = TrackFacets.decadeBounds(label);
+        if (bounds == null) {
+            return new MatchNoDocsQuery();
         }
-        try {
-            int from = Integer.parseInt(parts[0].trim());
-            int to = Integer.parseInt(parts[1].trim());
-            return IntField.newRangeQuery(TrackDocumentMapper.YEAR, from, to);
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return IntField.newRangeQuery(TrackDocumentMapper.YEAR, bounds[0], bounds[1]);
     }
 }

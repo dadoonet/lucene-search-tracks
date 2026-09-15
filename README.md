@@ -15,10 +15,11 @@ snapshot of a local Rekordbox library; tests never open SQLCipher. Each test
 prints an emoji narrative of the query and the top Lucene hits (with scores).
 
 `mvn compile exec:java` boots a Javalin playground on
-[http://localhost:7070](http://localhost:7070): six chapters (analyze, map,
-index, search, suggest, facets) with the Java snippet on the left, live
-controls in the middle, and Lucene’s view (tokens, posting lists, `Query`,
-`Explanation`, histograms) on the right.
+[http://localhost:7070](http://localhost:7070): analyze, map, index, search,
+facets, suggest, highlighting, then a demo tab on the far right. The Java
+snippet sits on the left, live controls in the middle, and Lucene’s view
+(tokens, posting lists, `Query`, `Explanation`, histograms, highlighted
+fields) on the right.
 
 | Post           | Test class                |
 |----------------|---------------------------|
@@ -27,3 +28,4 @@ controls in the middle, and Lucene’s view (tokens, posting lists, `Query`,
 | Part 3 Search  | `TrackSearchTest`         |
 | Part 4 Suggest | `TrackSuggestTest`        |
 | Part 5 Facets  | `TrackFacetsTest`         |
+| Highlighting   | `TrackHighlighterTest`    |

@@ -186,33 +186,6 @@ searcher.explain(q, hits.scoreDocs[0].doc);`,
       runSearch();
     }
   },
-  suggest: {
-    kicker: "Part 4 · AnalyzingInfixSuggester",
-    title: "Suggest",
-    lede: "The payload says whether the suggestion is a title, artist, or genre. A genre chip becomes a FILTER, not free text.",
-    snippet: `suggester.lookup("club", Set.of(), 10, false, true);
-// payload = "genre" | "title" | "artist"
-Query chip = new TermQuery(new Term("genre.raw.normalized", "club house"));`,
-    render(root) {
-      root.innerHTML = `
-        <div class="controls">
-          <label class="field">Prefix
-            <input id="prefix" type="text" value="club" autocomplete="off">
-          </label>
-          <div class="presets">
-            ${preset("club")}${preset("Madonna")}${preset("sincla")}
-          </div>
-        </div>`;
-      bindText("prefix", () => runSuggest());
-      root.querySelectorAll("[data-preset]").forEach((button) => {
-        button.onclick = () => {
-          document.getElementById("prefix").value = button.dataset.preset;
-          runSuggest();
-        };
-      });
-      runSuggest();
-    }
-  },
   facets: {
     kicker: "Part 5 · DrillSideways",
     title: "Facets",
@@ -251,12 +224,72 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
       runFacets();
     }
   },
+  suggest: {
+    kicker: "Part 6 · AnalyzingInfixSuggester",
+    title: "Suggest",
+    lede: "The payload says whether the suggestion is a title, artist, or genre. A genre chip becomes a FILTER, not free text.",
+    snippet: `suggester.lookup("club", Set.of(), 10, false, true);
+// payload = "genre" | "title" | "artist"
+Query chip = new TermQuery(new Term("genre.raw.normalized", "club house"));`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">Prefix
+            <input id="prefix" type="text" value="club" autocomplete="off">
+          </label>
+          <div class="presets">
+            ${preset("club")}${preset("Madonna")}${preset("sincla")}
+          </div>
+        </div>`;
+      bindText("prefix", () => runSuggest());
+      root.querySelectorAll("[data-preset]").forEach((button) => {
+        button.onclick = () => {
+          document.getElementById("prefix").value = button.dataset.preset;
+          runSuggest();
+        };
+      });
+      runSuggest();
+    }
+  },
+  highlight: {
+    kicker: "Part 7 · UnifiedHighlighter",
+    title: "Highlighting",
+    lede: "The query that scores a hit also marks the stored text. Bold tags follow token offsets — including the last-token PrefixQuery you already saw on suggest.",
+    snippet: `UnifiedHighlighter highlighter = UnifiedHighlighter.builder(searcher, analyzer)
+    .withMaxLength(10_000)
+    .withBreakIterator(WholeBreakIterator::new)
+    .build();
+Map<String, String[]> hl = highlighter.highlightFields(
+        new String[]{"title", "artist", "genre", "album", "label", "comment"},
+        q, hits);`,
+    render(root) {
+      root.innerHTML = `
+        <div class="controls">
+          <label class="field">q
+            <input id="hq" type="text" value="Bob" autocomplete="off">
+          </label>
+          <div class="presets">
+            ${preset("Bob")}${preset("nate")}${preset("sincla")}${preset("ouse")}
+          </div>
+        </div>`;
+      bindText("hq", () => runHighlight());
+      root.querySelectorAll("[data-preset]").forEach((button) => {
+        button.onclick = () => {
+          document.getElementById("hq").value = button.dataset.preset;
+          runHighlight();
+        };
+      });
+      runHighlight();
+    }
+  },
   demo: {
     kicker: "All together",
     title: "Demo",
-    lede: "Type to search. A genre or artist suggestion pins a chip; a title fills the bar. Click a chip to flip filter in / filter out.",
+    lede: "Type to search. A genre or artist suggestion pins a chip; a title fills the bar. Click a chip to flip filter in / filter out. Highlighted fields show where the query matched.",
     snippet: `Query q = TrackLuceneQueryBuilder.buildStructured(text, filters, mustNots);
 TopDocs hits = searcher.search(q, 25);
+UnifiedHighlighter.builder(searcher, analyzer).build()
+        .highlightFields(new String[]{"title", "artist", "genre"}, q, hits);
 new DrillSideways(searcher, config, state).search(drillDown, 1);`,
     render(root) {
       demoState = { chips: [], suggest: [], open: false, gen: 0 };
@@ -280,7 +313,7 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
               <div class="demo-table-wrap">
                 <table class="demo-table">
                   <thead>
-                    <tr><th>Title</th><th>Artist</th><th>Genre</th></tr>
+                    <tr><th>Title</th><th>Artist</th><th>Genre</th><th>Rating</th><th>Key</th></tr>
                   </thead>
                   <tbody id="demo-hits"></tbody>
                 </table>
@@ -513,9 +546,43 @@ function starRow(rating) {
   return html + "</span>";
 }
 
+const CAMELOT_CODES = [
+  "10A", "10B", "11A", "11B", "12A", "12B",
+  "1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B",
+  "5A", "5B", "6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B"
+];
+
+function camelotCode(keyName) {
+  if (keyName == null) return null;
+  const trimmed = String(keyName).trim();
+  if (!trimmed) return null;
+  for (const code of CAMELOT_CODES) {
+    if (trimmed === code || trimmed.startsWith(code + " ")
+        || trimmed.startsWith(code + "(") || trimmed.startsWith(code + "-")) {
+      return code;
+    }
+  }
+  return null;
+}
+
+function camelotBadgeClasses(keyName) {
+  if (keyName == null || String(keyName).trim() === "") return null;
+  const code = camelotCode(keyName);
+  return code == null
+      ? "camelot-badge camelot-unknown"
+      : "camelot-badge camelot-" + code.toLowerCase();
+}
+
+function camelotBadgeLabel(keyName) {
+  if (keyName == null || String(keyName).trim() === "") return null;
+  const code = camelotCode(keyName);
+  return code != null ? code : String(keyName).trim();
+}
+
 function keyBadge(key) {
-  const code = cardDash(key);
-  return code === "—" ? "—" : `<span class="key-badge">${escapeHtml(code)}</span>`;
+  const classes = camelotBadgeClasses(key);
+  if (classes == null) return "—";
+  return `<span class="${classes}">${escapeHtml(camelotBadgeLabel(key))}</span>`;
 }
 
 function renderTrackCard(data) {
@@ -1149,6 +1216,61 @@ async function runSuggest() {
       </div>`).join("") || `<p class="muted">nothing in the dictionary</p>`}`);
 }
 
+async function runHighlight() {
+  const q = document.getElementById("hq").value;
+  const data = await getJson("/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q, filters: {}, mustNots: {} })
+  });
+  setCues(data.tokens || []);
+  setSnippet(highlightSnippet(q, data.tokens || []));
+  readout(`
+    <h3>${data.total} hits</h3>
+    <p class="muted">${escapeHtml(data.query)}</p>
+    ${(data.hits || []).map((hit) => `
+      <div class="hit">
+        <span class="score">${hit.score.toFixed(2)}</span>
+        <div>${highlightFieldsHtml(hit)}</div>
+      </div>`).join("") || `<p class="muted">no hits</p>`}`);
+}
+
+function highlightSnippet(q, tokens) {
+  const tokenList = tokens.length ? tokens.map((token) => javaString(token)).join(", ") : "";
+  return `Query q = TrackLuceneQueryBuilder.buildStructured(${javaString(q)}, Map.of(), Map.of());
+TopDocs hits = searcher.search(q, 25);
+// tokens: ${tokenList || "match-all"}
+
+UnifiedHighlighter highlighter = UnifiedHighlighter.builder(searcher, analyzer)
+    .withMaxLength(10_000)
+    .withBreakIterator(WholeBreakIterator::new)
+    .build();
+Map<String, String[]> hl = highlighter.highlightFields(
+        new String[]{"title", "artist", "genre", "album", "label", "comment"},
+        q, hits);`;
+}
+
+function highlightFieldsHtml(hit) {
+  const fields = hit.highlights || {};
+  const always = ["title", "artist", "genre"];
+  const extra = ["album", "label", "comment"];
+  const names = [
+    ...always.filter((field) => fields[field]),
+    ...extra.filter((field) => (fields[field] || "").includes("<b>"))
+  ];
+  if (!names.length) {
+    return `<span>${escapeHtml(hit.artist)} — ${escapeHtml(hit.title)}</span>`;
+  }
+  return names.map((field) => {
+    const snippet = fields[field];
+    const matched = snippet.includes("<b>");
+    return `<div class="hl-field${matched ? " is-on" : ""}">
+      <span class="muted">${escapeHtml(field)}</span>
+      <span class="hl">${safeHighlight(snippet)}</span>
+    </div>`;
+  }).join("");
+}
+
 function safeHighlight(html) {
   return escapeHtml(html || "")
       .replaceAll("&lt;b&gt;", "<b>")
@@ -1174,7 +1296,7 @@ async function runFacets() {
       <h3>${dim.emoji} ${escapeHtml(dim.name)}</h3>
       ${dim.buckets.map((bucket) => `
         <div class="bucket${drillGenre && bucket.label === drillGenre ? " is-on" : ""}">
-          <span>${escapeHtml(bucket.label)}</span>
+          <span>${facetBucketLabel(dim.name, bucket.label)}</span>
           <span>${bucket.count}</span>
         </div>`).join("")}
     `).join("")}`);
@@ -1412,7 +1534,7 @@ function renderDemoChips() {
       <button type="button" class="demo-chip is-${chip.mode}" data-chip-dim="${escapeAttr(chip.dim)}" data-chip-value="${escapeAttr(chip.value)}" aria-label="${escapeAttr(chip.dim + ": " + chip.value + ", " + mode + ". Click to invert.")}">
         <span class="demo-chip-mode">${chip.mode === "out" ? "−" : "+"}</span>
         <span class="demo-chip-dim">${escapeHtml(chip.dim)}</span>
-        <span class="demo-chip-value">${escapeHtml(chip.value)}</span>
+        <span class="demo-chip-value">${facetBucketLabel(chip.dim, chip.value)}</span>
         <span class="demo-chip-remove" data-chip-remove="1" aria-label="Remove filter">×</span>
       </button>`;
   }).join("");
@@ -1454,8 +1576,14 @@ async function runDemo() {
     "        " + javaString(q) + ", filters, mustNots);",
     "// " + search.query,
     "TopDocs hits = searcher.search(q, 25);",
+    "UnifiedHighlighter.builder(searcher, analyzer).build()",
+    "        .highlightFields(new String[]{\"title\", \"artist\", \"genre\"}, q, hits);",
     collector
   ].join("\n"));
+}
+
+function facetBucketLabel(dim, value) {
+  return dim === "rating" ? starRow(value) : escapeHtml(value);
 }
 
 function renderDemoFacets(dims) {
@@ -1469,9 +1597,10 @@ function renderDemoFacets(dims) {
       ${(dim.buckets || []).map((bucket) => {
         const index = demoChipIndex(dim.name, bucket.label);
         const mode = index < 0 ? "" : demoState.chips[index].mode;
+        const empty = Number(bucket.count) === 0 ? " is-zero" : "";
         return `
-        <button type="button" class="demo-bucket${mode ? ` is-${mode}` : ""}" data-facet-dim="${escapeAttr(dim.name)}" data-facet-value="${escapeAttr(bucket.label)}">
-          <span>${escapeHtml(bucket.label)}</span>
+        <button type="button" class="demo-bucket${mode ? ` is-${mode}` : ""}${empty}" data-facet-dim="${escapeAttr(dim.name)}" data-facet-value="${escapeAttr(bucket.label)}">
+          <span>${facetBucketLabel(dim.name, bucket.label)}</span>
           <span>${bucket.count}</span>
         </button>`;
       }).join("")}
@@ -1490,9 +1619,11 @@ function renderDemoHits(search) {
       : "no hits";
   body.innerHTML = hits.map((hit) => `
     <tr>
-      <td>${escapeHtml(hit.title)}</td>
-      <td>${escapeHtml(hit.artist)}</td>
-      <td>${escapeHtml(hit.genre || "—")}</td>
+      <td>${safeHighlight(hit.highlights?.title || hit.title)}</td>
+      <td>${safeHighlight(hit.highlights?.artist || hit.artist)}</td>
+      <td>${safeHighlight(hit.highlights?.genre || hit.genre || "—")}</td>
+      <td>${starRow(hit.rating)}</td>
+      <td>${keyBadge(hit.key)}</td>
     </tr>`).join("");
 }
 

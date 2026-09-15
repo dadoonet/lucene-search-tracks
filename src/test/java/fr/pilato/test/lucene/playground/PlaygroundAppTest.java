@@ -57,7 +57,11 @@ class PlaygroundAppTest {
             assertThat(response.body().string())
                     .contains("Lucene playground")
                     .contains("lang=\"en\"")
-                    .contains("7 Demo")
+                    .contains("5 Facets")
+                    .contains("6 Suggest")
+                    .contains("7 Highlighting")
+                    .contains("8 Demo")
+                    .contains("data-chapter=\"highlight\"")
                     .contains("data-chapter=\"demo\"")
                     .contains("Built on Lucene " + Version.LATEST)
                     .contains("href=\"https://david.pilato.fr/\">David Pilato</a>");
@@ -101,7 +105,46 @@ class PlaygroundAppTest {
                     .contains("mustNots")
                     .contains("fa-music")
                     .contains("fa-tag")
-                    .contains("fa-circle-user");
+                    .contains("fa-circle-user")
+                    .contains("<th>Rating</th>")
+                    .contains("<th>Key</th>")
+                    .contains("starRow(hit.rating)")
+                    .contains("keyBadge(hit.key)")
+                    .contains("camelot-badge")
+                    .contains("facetBucketLabel")
+                    .contains("hit.highlights")
+                    .contains("UnifiedHighlighter");
+        });
+    }
+
+    @Test
+    void playgroundJs_hasHighlightChapterAfterSuggest() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/playground.js");
+            assertThat(response.code()).isEqualTo(200);
+            String js = response.body().string();
+            assertThat(js).contains("kicker: \"Part 7 · UnifiedHighlighter\"");
+            assertThat(js.indexOf("highlight:")).isGreaterThan(js.indexOf("suggest:"));
+            assertThat(js.indexOf("demo:")).isGreaterThan(js.indexOf("highlight:"));
+        });
+    }
+
+    @Test
+    void playgroundCss_hasCamelotWheelSlots() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/playground.css");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains(".camelot-badge")
+                    .contains(".camelot-1a")
+                    .contains(".camelot-12b")
+                    .contains(".camelot-unknown")
+                    .contains(".stars .fa-regular")
+                    .contains("width: 2.6em")
+                    .contains("[data-chapter=\"demo\"]")
+                    .contains("margin-left: auto")
+                    .contains(".demo-table b")
+                    .contains(".hl-field");
         });
     }
 }

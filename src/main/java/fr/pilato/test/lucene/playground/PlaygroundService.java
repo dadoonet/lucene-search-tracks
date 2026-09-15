@@ -5,6 +5,7 @@ import fr.pilato.test.lucene.TrackAnalyzers;
 import fr.pilato.test.lucene.TrackDatasetLoader;
 import fr.pilato.test.lucene.TrackDocumentMapper;
 import fr.pilato.test.lucene.TrackFacets;
+import fr.pilato.test.lucene.TrackHighlighter;
 import fr.pilato.test.lucene.TrackLuceneQueryBuilder;
 import fr.pilato.test.lucene.TrackSearchIndex;
 import fr.pilato.test.lucene.TrackSuggestion;
@@ -42,6 +43,8 @@ import org.apache.lucene.util.RamUsageEstimator;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -249,10 +252,12 @@ public final class PlaygroundService implements AutoCloseable {
         IndexSearcher searcher = index.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
             TopDocs top = searcher.search(lucene, TOP_HITS);
+            List<Map<String, String>> highlighted = TrackHighlighter.highlight(searcher, lucene, top);
             int total = Math.toIntExact(top.totalHits.value());
             Integer explainDoc = request == null ? null : request.explainDoc();
             List<SearchHitView> hits = new ArrayList<>();
-            for (ScoreDoc hit : top.scoreDocs) {
+            for (int i = 0; i < top.scoreDocs.length; i++) {
+                ScoreDoc hit = top.scoreDocs[i];
                 var idField = searcher.storedFields()
                         .document(hit.doc)
                         .getField(TrackDocumentMapper.ID);
@@ -267,7 +272,8 @@ public final class PlaygroundService implements AutoCloseable {
                 if (explainDoc != null && explainDoc == hit.doc) {
                     expl = searcher.explain(lucene, hit.doc);
                 }
-                hits.add(searchHit(hit.doc, track, hit.score, expl, tokens));
+                Map<String, String> snippets = i < highlighted.size() ? highlighted.get(i) : Map.of();
+                hits.add(searchHit(hit.doc, track, hit.score, expl, tokens, snippets));
             }
             if (explainDoc == null && !hits.isEmpty()) {
                 SearchHitView first = hits.getFirst();
@@ -277,7 +283,8 @@ public final class PlaygroundService implements AutoCloseable {
                         byId.get(first.id()),
                         first.score(),
                         expl,
-                        tokens));
+                        tokens,
+                        first.highlights()));
             }
             return new SearchResponse(
                     q,
@@ -289,7 +296,12 @@ public final class PlaygroundService implements AutoCloseable {
     }
 
     private static SearchHitView searchHit(
-            int luceneDoc, Track track, float score, Explanation expl, List<String> tokens) {
+            int luceneDoc,
+            Track track,
+            float score,
+            Explanation expl,
+            List<String> tokens,
+            Map<String, String> snippets) {
         return new SearchHitView(
                 luceneDoc,
                 track.id(),
@@ -302,7 +314,30 @@ public final class PlaygroundService implements AutoCloseable {
                 track.year(),
                 score,
                 expl == null ? null : expl.toString(),
-                expl == null ? null : PlaygroundExplain.from(expl, tokens));
+                expl == null ? null : PlaygroundExplain.from(expl, tokens),
+                displayedHighlights(track, snippets));
+    }
+
+    private static Map<String, String> displayedHighlights(Track track, Map<String, String> snippets) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        putHighlight(fields, snippets, TrackDocumentMapper.TITLE, track.title());
+        putHighlight(fields, snippets, TrackDocumentMapper.ARTIST, track.artist());
+        putHighlight(fields, snippets, TrackDocumentMapper.GENRE, track.genre());
+        putHighlight(fields, snippets, TrackDocumentMapper.ALBUM, track.album());
+        putHighlight(fields, snippets, TrackDocumentMapper.LABEL, track.label());
+        putHighlight(fields, snippets, TrackDocumentMapper.COMMENT, track.comment());
+        return Map.copyOf(fields);
+    }
+
+    private static void putHighlight(
+            Map<String, String> fields, Map<String, String> snippets, String name, String fallback) {
+        String snippet = snippets == null ? null : snippets.get(name);
+        if (snippet == null || snippet.isBlank()) {
+            snippet = fallback == null ? "" : fallback;
+        }
+        if (!snippet.isBlank()) {
+            fields.put(name, snippet);
+        }
     }
 
     public SuggestResponse suggest(String prefix) throws IOException {
@@ -357,8 +392,8 @@ public final class PlaygroundService implements AutoCloseable {
                     String.join(", ", genres),
                     List.of(
                             dim("genre", "🏷️", children(facets.getAllChildren(TrackFacets.GENRE), 12)),
-                            dim("bpm", "⏱", children(facets.getAllChildren(TrackDocumentMapper.BPM), 16)),
-                            dim("rating", "⭐", children(facets.getAllChildren(TrackDocumentMapper.RATING), 6)),
+                            dim("bpm", "⏱", bpmBuckets(facets.getAllChildren(TrackDocumentMapper.BPM))),
+                            dim("rating", "⭐", ratings(facets.getAllChildren(TrackDocumentMapper.RATING))),
                             dim("year", "📅", decades(facets.getAllChildren(TrackDocumentMapper.YEAR)))),
                     facetRewrite());
         }
@@ -450,11 +485,35 @@ public final class PlaygroundService implements AutoCloseable {
         return List.copyOf(buckets);
     }
 
+    /** BPM ranges in definition order (0–80 … 220+), skipping empty buckets. */
+    private static List<FacetBucket> bpmBuckets(FacetResult result) {
+        Map<String, Long> counts = countsByLabel(result);
+        List<FacetBucket> buckets = new ArrayList<>();
+        for (var range : TrackFacets.bpmRanges()) {
+            long count = counts.getOrDefault(range.label, 0L);
+            if (count > 0) {
+                buckets.add(new FacetBucket(range.label, count));
+            }
+        }
+        return List.copyOf(buckets);
+    }
+
+    /** Always 5★ → 0★, including empty buckets. */
+    private static List<FacetBucket> ratings(FacetResult result) {
+        Map<String, Long> counts = countsByLabel(result);
+        List<FacetBucket> buckets = new ArrayList<>(6);
+        for (int stars = 5; stars >= 0; stars--) {
+            String label = Integer.toString(stars);
+            buckets.add(new FacetBucket(label, counts.getOrDefault(label, 0L)));
+        }
+        return List.copyOf(buckets);
+    }
+
     private static List<FacetBucket> decades(FacetResult result) {
         if (result == null || result.labelValues == null) {
             return List.of();
         }
-        Map<String, Long> grouped = new LinkedHashMap<>();
+        Map<String, Long> grouped = new HashMap<>();
         for (LabelAndValue value : result.labelValues) {
             int year;
             try {
@@ -462,16 +521,33 @@ public final class PlaygroundService implements AutoCloseable {
             } catch (NumberFormatException e) {
                 continue;
             }
-            if (year <= 0) {
+            String label = TrackFacets.decadeLabel(year);
+            if (label == null) {
                 continue;
             }
-            int decade = (year / 10) * 10;
-            String label = decade + "–" + (decade + 9);
             grouped.merge(label, value.value.longValue(), Long::sum);
         }
         return grouped.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0)
                 .map(entry -> new FacetBucket(entry.getKey(), entry.getValue()))
+                .sorted(Comparator.comparingInt(bucket -> decadeStart(bucket.label())))
                 .toList();
+    }
+
+    private static int decadeStart(String label) {
+        int[] bounds = TrackFacets.decadeBounds(label);
+        return bounds == null ? Integer.MAX_VALUE : bounds[0];
+    }
+
+    private static Map<String, Long> countsByLabel(FacetResult result) {
+        Map<String, Long> counts = new HashMap<>();
+        if (result == null || result.labelValues == null) {
+            return counts;
+        }
+        for (LabelAndValue value : result.labelValues) {
+            counts.put(value.label, value.value.longValue());
+        }
+        return counts;
     }
 
     private static String stored(IndexableField field) {

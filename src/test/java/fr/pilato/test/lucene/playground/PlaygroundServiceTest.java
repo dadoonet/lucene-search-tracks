@@ -4,9 +4,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetBucket;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.SearchRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -222,6 +224,16 @@ class PlaygroundServiceTest {
     }
 
     @Test
+    void search_bobHighlightsMatchingTitle() throws Exception {
+        var bob = service.search(new SearchRequest("Bob", Map.of(), Map.of(), null));
+        assertThat(bob.hits())
+                .anySatisfy(hit -> {
+                    assertThat(hit.title()).isEqualTo("Free (Bob Sinclar Remix)");
+                    assertThat(hit.highlights().get("title")).contains("Free (<b>Bob</b> Sinclar Remix)");
+                });
+    }
+
+    @Test
     void suggest_clubReturnsGenreAndTitle() throws Exception {
         assertThat(service.suggest("club").hits())
                 .extracting(PlaygroundModels.SuggestHitView::text, PlaygroundModels.SuggestHitView::field)
@@ -264,6 +276,43 @@ class PlaygroundServiceTest {
     }
 
     @Test
+    void facets_ratingAlwaysShowsFiveToZeroDescending() throws Exception {
+        var bob = service.facets("Bob", "");
+        assertThat(labels(bob, "rating")).containsExactly("5", "4", "3", "2", "1", "0");
+        assertThat(count(bob, "rating", "5")).isEqualTo(13);
+
+        var fives = service.facets("Bob", Map.of("rating", List.of("5")), Map.of());
+        assertThat(labels(fives, "rating")).containsExactly("5", "4", "3", "2", "1", "0");
+        assertThat(count(fives, "rating", "5")).isEqualTo(13);
+        assertThat(count(fives, "rating", "2")).isZero();
+    }
+
+    @Test
+    void facets_yearSkipsMissingAndJunkYears() throws Exception {
+        var all = service.facets("", "");
+        assertThat(labels(all, "year"))
+                .isNotEmpty()
+                .doesNotContain("0–9")
+                .first()
+                .isEqualTo("1950–1959");
+        assertThat(count(all, "year", "2020–2029")).isEqualTo(1395);
+
+        var hits = service.search(new SearchRequest(
+                "", Map.of("year", List.of("0–9")), Map.of(), null));
+        assertThat(hits.total()).isZero();
+    }
+
+    @Test
+    void facets_bpmAndYearSortedByKey() throws Exception {
+        var bob = service.facets("Bob", "");
+        List<String> bpm = labels(bob, "bpm");
+        assertThat(bpm).isNotEmpty().isSortedAccordingTo(Comparator.comparingInt(PlaygroundServiceTest::bpmRank));
+        List<String> years = labels(bob, "year");
+        assertThat(years).isNotEmpty()
+                .isSortedAccordingTo(Comparator.comparingInt(label -> Integer.parseInt(label.substring(0, 4))));
+    }
+
+    @Test
     void facets_showsFacetsConfigRewrite() throws Exception {
         var rewrite = service.facets("Bob", "").rewrite();
         assertThat(rewrite.before())
@@ -288,8 +337,27 @@ class PlaygroundServiceTest {
                 .filter(d -> dim.equals(d.name()))
                 .flatMap(d -> d.buckets().stream())
                 .filter(bucket -> label.equals(bucket.label()))
-                .mapToLong(PlaygroundModels.FacetBucket::count)
+                .mapToLong(FacetBucket::count)
                 .findFirst()
                 .orElse(0L);
+    }
+
+    private static List<String> labels(PlaygroundModels.FacetsResponse response, String dim) {
+        return response.dims().stream()
+                .filter(d -> dim.equals(d.name()))
+                .flatMap(d -> d.buckets().stream())
+                .map(FacetBucket::label)
+                .toList();
+    }
+
+    private static int bpmRank(String label) {
+        if ("0 – 80".equals(label)) {
+            return 0;
+        }
+        if ("220+".equals(label)) {
+            return 220;
+        }
+        String from = label.split(" – ", 2)[0];
+        return Integer.parseInt(from);
     }
 }
