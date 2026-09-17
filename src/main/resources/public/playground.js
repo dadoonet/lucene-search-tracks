@@ -187,13 +187,17 @@ searcher.explain(q, hits.scoreDocs[0].doc);`,
     kicker: "Part 5 · DrillSideways",
     title: "Facets",
     lede: "Counts follow the query. First enrich the Document for categorical dims, FacetsConfig.build at index time; numbers were already facet-ready.",
-    snippet: `// Categorical dims need a facet field. We update the mapper:
-doc.add(new SortedSetDocValuesFacetField("genre", "Club"));
+    snippet: `FacetsConfig facetsConfig = new FacetsConfig();
 
-FacetsConfig facetsConfig = new FacetsConfig();
-// Index track #255465792: Ultra Naté - Free (Bob Sinclar Remix)
+// We update the mapper as categorical dims need a facet field
+doc.add(new SortedSetDocValuesFacetField("genre", "Club"));
+// This produces behind the scene:
+// doc.add(new SortedSetDocValuesField("$facets", new BytesRef("genre\\u001FClub")))
+// doc.add(new StringField("$facets", "genre\\u001FClub", Store.NO))
+// doc.add(new StringField("$facets", "genre", Store.NO))
+
+// Index track #255465792 with the facet fields
 Document doc255465792 = mapper.toDocument(Tracks.trackFrom(255465792));
-// was writer.addDocument(doc255465792);
 writer.addDocument(facetsConfig.build(doc255465792));
 
 FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)
@@ -1484,45 +1488,27 @@ function facetRewriteHtml(rewrite) {
     </div>`;
 }
 
-function facetCtor(field) {
-  if (field.luceneType === "SortedSetDocValuesFacetField") {
-    return `new SortedSetDocValuesFacetField(${javaString(field.name)}, ${javaString(field.value)})`;
-  }
-  if (field.luceneType === "SortedSetDocValuesField") {
-    return `new SortedSetDocValuesField(${javaString(field.name)}, new BytesRef(${javaString(field.value)}))`;
-  }
-  return `new ${field.luceneType}(${javaString(field.name)}, ${javaString(field.value)}, Store.NO)`;
-}
-
-function facetsSnippet(rewrite) {
+function facetsSnippet(_rewrite) {
   const lines = [
-    "// Categorical dims need a facet field. We update the mapper:",
-    "doc.add(new SortedSetDocValuesFacetField(\"genre\", \"Club\"));",
-    "",
     "FacetsConfig facetsConfig = new FacetsConfig();",
-    "// Index track #255465792: Ultra Naté - Free (Bob Sinclar Remix)",
+    "",
+    "// We update the mapper as categorical dims need a facet field",
+    "doc.add(new SortedSetDocValuesFacetField(\"genre\", \"Club\"));",
+    "// This produces behind the scene:",
+    "// doc.add(new SortedSetDocValuesField(\"$facets\", new BytesRef(\"genre\\u001FClub\")))",
+    "// doc.add(new StringField(\"$facets\", \"genre\\u001FClub\", Store.NO))",
+    "// doc.add(new StringField(\"$facets\", \"genre\", Store.NO))",
+    "",
+    "// Index track #255465792 with the facet fields",
     "Document doc255465792 = mapper.toDocument(Tracks.trackFrom(255465792));",
-    "// was writer.addDocument(doc255465792);",
     "writer.addDocument(facetsConfig.build(doc255465792));",
-    ""
+    "",
+    "FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)",
+    "    .facetsCollector();",
+    "Facets genres = new SortedSetDocValuesFacetCounts(state, fc);",
+    "Facets bpm = new DoubleRangeFacetCounts(\"bpm\", fc, bpmRanges());",
+    "new DrillSideways(searcher, config, state).search(drillDown, 1);"
   ];
-  for (const field of rewrite?.before || []) {
-    lines.push(`// ${facetCtor(field)}`);
-  }
-  if ((rewrite?.before || []).length && (rewrite?.after || []).length) {
-    lines.push("// ↓");
-  }
-  for (const field of rewrite?.after || []) {
-    lines.push(`// ${facetCtor(field)}`);
-  }
-  if ((rewrite?.before || []).length || (rewrite?.after || []).length) {
-    lines.push("");
-  }
-  lines.push("FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)");
-  lines.push("    .facetsCollector();");
-  lines.push("Facets genres = new SortedSetDocValuesFacetCounts(state, fc);");
-  lines.push("Facets bpm = new DoubleRangeFacetCounts(\"bpm\", fc, bpmRanges());");
-  lines.push("new DrillSideways(searcher, config, state).search(drillDown, 1);");
   return lines.join("\n");
 }
 

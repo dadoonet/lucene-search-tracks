@@ -2,6 +2,7 @@ package fr.pilato.test.lucene.playground;
 
 import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
+import io.javalin.util.JavalinLogger;
 import org.apache.lucene.util.Version;
 
 import java.io.IOException;
@@ -27,11 +28,19 @@ public final class PlaygroundApp {
         PlaygroundService service = PlaygroundService.boot();
         Javalin app = create(service).start(PORT);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            app.stop();
+            // Maven wraps System.out with Jansi; concurrent ANSI writes during stop can throw
+            // NumberFormatException ("0m"). Skip Javalin logs and always close the service.
+            JavalinLogger.enabled = false;
             try {
-                service.close();
+                app.stop();
             } catch (Exception _) {
                 // shutdown
+            } finally {
+                try {
+                    service.close();
+                } catch (Exception _) {
+                    // shutdown
+                }
             }
         }));
         System.out.println("Lucene playground → http://localhost:" + PORT);
