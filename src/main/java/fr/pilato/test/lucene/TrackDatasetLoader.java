@@ -1,7 +1,6 @@
-package fr.pilato.test.lucene.helper;
+package fr.pilato.test.lucene;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fr.pilato.test.lucene.beans.Track;
 
 import java.io.BufferedReader;
 import java.io.IOException;
