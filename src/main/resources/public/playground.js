@@ -55,8 +55,7 @@ TokenStream ts = analyzer.tokenStream("title", "Around The World");`,
     lede: "Pick a track. Lucene stores it as these fields — TextField for full text, StringField for an exact FILTER.",
     snippet: `doc.add(new TextField("title", title, Store.YES));
 doc.add(new StringField("genre.raw.normalized", "club", Store.YES));
-doc.add(new DoubleField("bpm", 128.0, Store.YES));
-doc.add(new SortedSetDocValuesFacetField("genre", "Club"));`,
+doc.add(new DoubleField("bpm", 128.0, Store.YES));`,
     render(root) {
       root.innerHTML = `
         <div class="controls">
@@ -86,17 +85,15 @@ IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
 
 // Create Lucene doc for track #255465792: Ultra Naté - Free (Bob Sinclar Remix)
 Document doc255465792 = mapper.toDocument(Tracks.trackFrom(255465792));
-// Add the document to the index. This could have been:
-// writer.addDocument(doc255465792);
-writer.addDocument(facetsConfig.build(doc255465792));
+writer.addDocument(doc255465792);
 
 // Index track #172523747: Daft Punk - Around The World
 Document doc172523747 = mapper.toDocument(Tracks.trackFrom(172523747));
-writer.addDocument(facetsConfig.build(doc172523747));
+writer.addDocument(doc172523747);
 
 // Index track #106352474: Claude François - Cette année-là
 Document doc106352474 = mapper.toDocument(Tracks.trackFrom(106352474));
-writer.addDocument(facetsConfig.build(doc106352474));
+writer.addDocument(doc106352474);
 
 // Commit all the documents that have been indexed so far
 writer.commit();`,
@@ -189,8 +186,16 @@ searcher.explain(q, hits.scoreDocs[0].doc);`,
   facets: {
     kicker: "Part 5 · DrillSideways",
     title: "Facets",
-    lede: "Counts follow the query. A Club drill-down narrows BPM; other genres stay visible.",
-    snippet: `// Index time (page 3): FacetsConfig.build rewrites the page-2 facet field.
+    lede: "Counts follow the query. First enrich the Document for categorical dims, FacetsConfig.build at index time; numbers were already facet-ready.",
+    snippet: `// Categorical dims need a facet field. We update the mapper:
+doc.add(new SortedSetDocValuesFacetField("genre", "Club"));
+
+FacetsConfig facetsConfig = new FacetsConfig();
+// Index track #255465792: Ultra Naté - Free (Bob Sinclar Remix)
+Document doc255465792 = mapper.toDocument(Tracks.trackFrom(255465792));
+// was writer.addDocument(doc255465792);
+writer.addDocument(facetsConfig.build(doc255465792));
+
 FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)
     .facetsCollector();
 Facets genres = new SortedSetDocValuesFacetCounts(state, fc);
@@ -822,7 +827,7 @@ function mapGroupComment(root) {
     case "artist":
       return `${root}: TextField is analyzed (MUST). .raw keeps the original for display. .raw.normalized is the exact FILTER.`;
     case "genre":
-      return "genre: analyzed text, keyword FILTER (.raw.normalized), and SortedSet facet";
+      return "genre: analyzed text + keyword FILTER (.raw.normalized)";
     case "album":
     case "label":
     case "comment":
@@ -830,10 +835,10 @@ function mapGroupComment(root) {
     case "key":
       return "Camelot key — exact FILTER / MUST_NOT (lowercased)";
     case "bpm":
-      return "numeric range + facets. numericValue() is IEEE 754 bits; read storedValue().getDoubleValue()";
+      return "numeric range / sort. numericValue() is IEEE 754 bits; read storedValue().getDoubleValue()";
     case "rating":
     case "year":
-      return `${root}: numeric facets (LongValueFacetCounts)`;
+      return `${root}: numeric filter / sort`;
     default:
       return null;
   }
@@ -841,8 +846,6 @@ function mapGroupComment(root) {
 
 function mapSnippetLines(groups) {
   const lines = [{ code: "Document doc = new Document();" }];
-  const genre = groups.flatMap((group) => group.fields)
-      .find((field) => field.name === "genre")?.value || "";
   groups.forEach((group, index) => {
     if (index > 0) {
       lines.push({ code: "" });
@@ -853,12 +856,7 @@ function mapSnippetLines(groups) {
     }
     for (const field of group.fields) {
       if (field.luceneType === "SortedSetDocValuesFacetField") {
-        if (genre) {
-          lines.push({
-            code: `doc.add(new SortedSetDocValuesFacetField("genre", ${javaString(genre)}));`,
-            root: group.root
-          });
-        }
+        // Facet-only fields belong to the Facets chapter.
         continue;
       }
       const name = javaString(field.name);
@@ -1479,7 +1477,7 @@ function facetRewriteHtml(rewrite) {
     <p class="muted">${escapeHtml(field.role || "")}</p>`;
   return `
     <div class="facet-rewrite">
-      <p class="muted">Ultra Naté · page 2 field → indexed $facets</p>
+      <p class="muted">Ultra Naté · SortedSetDocValuesFacetField → indexed $facets</p>
       ${before.map(row).join("")}
       <div class="bbl-down">↓</div>
       ${after.map(row).join("")}
@@ -1497,7 +1495,17 @@ function facetCtor(field) {
 }
 
 function facetsSnippet(rewrite) {
-  const lines = ["// Index time (page 3): FacetsConfig.build rewrites the page-2 facet field."];
+  const lines = [
+    "// Categorical dims need a facet field. We update the mapper:",
+    "doc.add(new SortedSetDocValuesFacetField(\"genre\", \"Club\"));",
+    "",
+    "FacetsConfig facetsConfig = new FacetsConfig();",
+    "// Index track #255465792: Ultra Naté - Free (Bob Sinclar Remix)",
+    "Document doc255465792 = mapper.toDocument(Tracks.trackFrom(255465792));",
+    "// was writer.addDocument(doc255465792);",
+    "writer.addDocument(facetsConfig.build(doc255465792));",
+    ""
+  ];
   for (const field of rewrite?.before || []) {
     lines.push(`// ${facetCtor(field)}`);
   }
@@ -1506,6 +1514,9 @@ function facetsSnippet(rewrite) {
   }
   for (const field of rewrite?.after || []) {
     lines.push(`// ${facetCtor(field)}`);
+  }
+  if ((rewrite?.before || []).length || (rewrite?.after || []).length) {
+    lines.push("");
   }
   lines.push("FacetsCollector fc = FacetsCollectorManager.search(searcher, q, 1, manager)");
   lines.push("    .facetsCollector();");

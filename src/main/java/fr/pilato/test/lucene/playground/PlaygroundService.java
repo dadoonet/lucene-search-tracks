@@ -161,13 +161,13 @@ public final class PlaygroundService implements AutoCloseable {
         Document doc = TrackDocumentMapper.toDocument(track);
         List<MappedField> fields = new ArrayList<>();
         for (IndexableField field : doc.getFields()) {
+            // Search story (Map): facet-only fields appear later in Facets.
+            if (field instanceof SortedSetDocValuesFacetField) {
+                continue;
+            }
             String type = field.getClass().getSimpleName();
             String name = field.name();
             String value = stored(field);
-            if (field instanceof SortedSetDocValuesFacetField facet) {
-                name = facet.dim;
-                value = String.join("/", facet.path);
-            }
             boolean tokenized = field.fieldType().tokenized();
             List<String> tokens = tokenized
                     ? TrackAnalyzers.tokenize(value).stream().sorted(String.CASE_INSENSITIVE_ORDER).toList()
@@ -461,7 +461,7 @@ public final class PlaygroundService implements AutoCloseable {
                         "SortedSetDocValuesFacetField",
                         facet.dim,
                         String.join("/", facet.path),
-                        "page 2"));
+                        "added for facets"));
                 continue;
             }
             if (!FacetsConfig.DEFAULT_INDEX_FIELD_NAME.equals(field.name())) {
@@ -650,8 +650,8 @@ public final class PlaygroundService implements AutoCloseable {
                  TrackDocumentMapper.ARTIST_RAW_NORMALIZED,
                  TrackDocumentMapper.GENRE_RAW_NORMALIZED -> "exact FILTER";
             case TrackDocumentMapper.KEY_CODE -> "exact FILTER / MUST_NOT";
-            case TrackDocumentMapper.BPM -> "numeric range + facets";
-            case TrackDocumentMapper.RATING, TrackDocumentMapper.YEAR -> "numeric facets";
+            case TrackDocumentMapper.BPM -> "numeric range / sort";
+            case TrackDocumentMapper.RATING, TrackDocumentMapper.YEAR -> "numeric filter / sort";
             default -> "stored field";
         };
     }

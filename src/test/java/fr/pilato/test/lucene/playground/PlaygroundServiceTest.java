@@ -140,16 +140,11 @@ class PlaygroundServiceTest {
                     assertThat(field.name()).isEqualTo("bpm");
                     assertThat(field.value()).isEqualTo("128.0");
                     assertThat(field.role())
-                            .startsWith("numeric range + facets")
+                            .startsWith("numeric range / sort")
                             .contains("IEEE 754")
                             .contains("numericValue() = 0x" + Long.toHexString(Double.doubleToLongBits(128.0)).toUpperCase());
                 })
-                .anySatisfy(field -> {
-                    assertThat(field.luceneType()).isEqualTo("SortedSetDocValuesFacetField");
-                    assertThat(field.name()).isEqualTo("genre");
-                    assertThat(field.value()).isEqualTo("Club");
-                    assertThat(field.role()).isEqualTo("facet dimension");
-                })
+                .noneMatch(field -> "SortedSetDocValuesFacetField".equals(field.luceneType()))
                 .noneMatch(field -> "dummy".equals(field.name()) || "dummy".equals(field.value()));
     }
 
