@@ -197,6 +197,7 @@ class PlaygroundServiceTest {
         assertThat(bob.query()).contains("title:bob");
         assertThat(bob.hits()).isNotEmpty();
         assertThat(bob.hits().getFirst().explain()).contains("bob");
+        assertThat(bob.tookMs()).isGreaterThanOrEqualTo(0);
 
         var club = service.search(new SearchRequest(
                 "Bob", Map.of("genre", List.of("Club")), Map.of(), null));
@@ -388,5 +389,37 @@ class PlaygroundServiceTest {
         }
         String from = label.split(" – ", 2)[0];
         return Integer.parseInt(from);
+    }
+
+    @Test
+    void elasticsearch_isOffAfterBootWithoutCredentials() {
+        var status = service.elasticsearch();
+        assertThat(status.url()).isEqualTo("http://localhost:9200/");
+        assertThat(status.apiKeySet()).isFalse();
+        assertThat(status.ready()).isFalse();
+        assertThat(status.docs()).isZero();
+    }
+
+    @Test
+    void elasticsearch_unreachableHostStaysOfflineAndDoesNotThrow() {
+        try {
+            var status = service.connectElasticsearch(
+                    "http://127.0.0.1:9/", "not-a-real-key");
+            assertThat(status.ready()).isFalse();
+            assertThat(status.url()).isEqualTo("http://127.0.0.1:9/");
+            assertThat(status.apiKeySet()).isTrue();
+            assertThat(status.error()).isNotBlank();
+            assertThat(status.docs()).isZero();
+        } finally {
+            service.disconnectElasticsearch();
+        }
+    }
+
+    @Test
+    void search_elasticsearchBackend_rejectedUntilReady() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.search(new SearchRequest("Bob", Map.of(), Map.of(), null), "elasticsearch"))
+                .isInstanceOf(ElasticsearchNotReadyException.class)
+                .hasMessageContaining("Elasticsearch");
     }
 }

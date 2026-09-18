@@ -61,6 +61,8 @@ public abstract class TrackSearchContractTest {
     @Test
     void bob_countsGenreBpmRatingYear() throws Exception {
         TrackFacetsResult facets = index().facets("Bob", Map.of());
+        assertThat(facets.genres()).containsKey("Club");
+        assertThat(facets.genres()).doesNotContainKey("club");
         assertThat(count(facets.genres(), "Club")).isEqualTo(26);
         assertThat(facets.bpm120to130()).isEqualTo(52);
         assertThat(count(facets.ratings(), "5")).isEqualTo(13);

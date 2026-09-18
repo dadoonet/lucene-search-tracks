@@ -84,7 +84,8 @@ public final class PlaygroundModels {
             List<String> tokens,
             String query,
             int total,
-            List<SearchHitView> hits) {}
+            List<SearchHitView> hits,
+            long tookMs) {}
 
     public record SuggestHitView(String text, String field, String highlight) {}
 
@@ -125,4 +126,13 @@ public final class PlaygroundModels {
             Map<String, List<String>> mustNots) {}
 
     public record MetaResponse(int numDocs, String directory, String heapSize, long builtInMs) {}
+
+    public record ElasticsearchStatus(
+            String url,
+            boolean apiKeySet,
+            boolean ready,
+            String error,
+            int docs) {}
+
+    public record ElasticsearchSettingsRequest(String url, String apiKey) {}
 }

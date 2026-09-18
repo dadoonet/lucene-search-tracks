@@ -239,10 +239,10 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         int filterCount = addClauses(result, filters, BooleanClause.Occur.FILTER);
         int notCount = addClauses(result, mustNots, BooleanClause.Occur.MUST_NOT);
         if (!hasText && filterCount == 0 && notCount == 0) {
-            return new MatchAllDocsQuery();
+            return MatchAllDocsQuery.INSTANCE;
         }
         if (!hasText && filterCount == 0 && notCount > 0) {
-            result.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);
+            result.add(MatchAllDocsQuery.INSTANCE, BooleanClause.Occur.MUST);
         }
         if (hasText && filterCount == 0 && notCount == 0) {
             return text;
@@ -269,11 +269,11 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
 
     private static Query analyzedFreeText(String text) {
         if (text == null || text.isBlank()) {
-            return new MatchAllDocsQuery();
+            return MatchAllDocsQuery.INSTANCE;
         }
         List<String> tokens = tokenize(text);
         if (tokens.isEmpty()) {
-            return new MatchAllDocsQuery();
+            return MatchAllDocsQuery.INSTANCE;
         }
         List<Query> tokenQueries = new ArrayList<>(tokens.size());
         for (int i = 0; i < tokens.size(); i++) {

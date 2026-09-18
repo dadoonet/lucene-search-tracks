@@ -61,6 +61,12 @@ class PlaygroundAppTest {
                     .contains("6 Suggest")
                     .contains("7 Highlighting")
                     .contains("data-chapter=\"demo\">Demo</button>")
+                    .contains("id=\"es-settings\"")
+                    .contains("fa-solid fa-gear")
+                    .contains("id=\"es-dialog\"")
+                    .contains("elastic.co/start-local")
+                    .contains("--esonly")
+                    .contains("ES_LOCAL_API_KEY")
                     .doesNotContain("8 Demo")
                     .contains("data-chapter=\"highlight\"")
                     .contains("Built on Lucene " + Version.LATEST)
@@ -109,6 +115,8 @@ class PlaygroundAppTest {
                     .contains("<th>Rating</th>")
                     .contains("<th>Key</th>")
                     .contains("starRow(hit.rating)")
+                    .contains("hits in")
+                    .contains("search.tookMs")
                     .contains("keyBadge(hit.key)")
                     .contains("camelot-badge")
                     .contains("renderCamelotWheel")
@@ -119,7 +127,59 @@ class PlaygroundAppTest {
                     .contains("facetBucketLabel")
                     .contains("hit.highlights")
                     .contains("UnifiedHighlighter")
-                    .contains("setZoneZoom(\"deck\")");
+                    .contains("setZoneZoom(\"deck\")")
+                    .contains("demo-backend")
+                    .contains("demo-engine-opt")
+                    .contains("setDemoBackend")
+                    .contains("\"curl\"")
+                    .contains("/api/elasticsearch")
+                    .contains("getElementById(\"es-url\")")
+                    .contains("getElementById(\"es-api-key\")");
+        });
+    }
+
+    @Test
+    void elasticsearch_defaultsToLocalhostAndStaysOffline() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/api/elasticsearch");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains("\"url\":\"http://localhost:9200/\"")
+                    .contains("\"apiKeySet\":false")
+                    .contains("\"ready\":false")
+                    .doesNotContain("apiKey\":\"");
+        });
+    }
+
+    @Test
+    void elasticsearch_putUnreachableHost_returnsOfflineStatus() {
+        try {
+            JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+                var response = client.put("/api/elasticsearch", """
+                        {"url":"http://127.0.0.1:9/","apiKey":"demo-key"}
+                        """);
+                assertThat(response.code()).isEqualTo(200);
+                String body = response.body().string();
+                assertThat(body)
+                        .contains("\"url\":\"http://127.0.0.1:9/\"")
+                        .contains("\"apiKeySet\":true")
+                        .contains("\"ready\":false")
+                        .contains("\"error\":")
+                        .doesNotContain("demo-key");
+            });
+        } finally {
+            service.disconnectElasticsearch();
+        }
+    }
+
+    @Test
+    void search_elasticsearchBackend_isConflictWhenOffline() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.post("/api/search?backend=elasticsearch", """
+                    {"q":"Bob","filters":{},"mustNots":{}}
+                    """);
+            assertThat(response.code()).isEqualTo(409);
+            assertThat(response.body().string()).contains("Elasticsearch");
         });
     }
 
@@ -166,6 +226,9 @@ class PlaygroundAppTest {
                     .contains(".stars .fa-regular")
                     .contains("width: 2.6em")
                     .contains("[data-chapter=\"demo\"]")
+                    .contains(".demo-cluster")
+                    .contains(".es-dialog")
+                    .contains(".demo-engine-opt")
                     .contains("margin-left: auto")
                     .contains("border-color: var(--cue)")
                     .contains(".demo-table b")

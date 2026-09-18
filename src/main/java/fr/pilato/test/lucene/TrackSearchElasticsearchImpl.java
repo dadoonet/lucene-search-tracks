@@ -224,14 +224,15 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     }
 
     private static Query term(String field, String value) {
-        String esField = "key".equals(field) ? "key" : field + ".raw";
+        String esField = "key".equals(field) ? "key" : field + ".normalized";
         return Query.of(q -> q.term(t -> t.field(esField).value(value.toLowerCase(Locale.ROOT))));
     }
 
     private static Property textWithRaw() {
         return Property.of(p -> p.text(t -> t
                 .analyzer("track")
-                .fields("raw", f -> f.keyword(k -> k.normalizer("keyword_ci")))));
+                .fields("raw", f -> f.keyword(k -> k))
+                .fields("normalized", f -> f.keyword(k -> k.normalizer("keyword_ci")))));
     }
 
     private static Map<String, Aggregate> metrics(Aggregate drill) {

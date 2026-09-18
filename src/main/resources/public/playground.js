@@ -313,8 +313,14 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
       root.innerHTML = `
         <div class="demo">
           <div class="demo-search">
+            <div class="demo-q-head">
+              <label class="demo-q-kicker" for="demo-q">Search</label>
+              <span class="demo-engine" id="demo-backend" role="radiogroup" aria-label="Engine">
+                <button type="button" class="demo-engine-opt" data-backend="lucene" aria-pressed="false">Lucene</button>
+                <button type="button" class="demo-engine-opt" data-backend="elasticsearch" aria-pressed="false">Elasticsearch</button>
+              </span>
+            </div>
             <label class="demo-q-shell">
-              <span class="demo-q-kicker">Search</span>
               <span class="demo-q-row">
                 <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                 <input id="demo-q" type="search" value="${escapeAttr(demoQ)}" autocomplete="off" spellcheck="false" placeholder="title, artist, genre…">
@@ -339,6 +345,19 @@ new DrillSideways(searcher, config, state).search(drillDown, 1);`,
           </div>
         </div>`;
       bindDemo();
+      document.getElementById("demo-backend").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-backend]");
+        if (!button) {
+          return;
+        }
+        if (button.dataset.backend === "elasticsearch" && !esStatus.ready) {
+          document.getElementById("es-settings")?.click();
+          return;
+        }
+        setDemoBackend(button.dataset.backend);
+        runDemo();
+      });
+      setDemoBackend(demoEngine);
       runDemo();
     }
   }
@@ -428,9 +447,21 @@ async function getJson(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || response.statusText);
+    throw new Error(jsonError(body) || response.statusText);
   }
   return response.json();
+}
+
+function jsonError(body) {
+  if (!body) {
+    return "";
+  }
+  try {
+    const json = JSON.parse(body);
+    return json.error || body;
+  } catch {
+    return body;
+  }
 }
 
 const ANALYZE_STEPS = [
@@ -1513,6 +1544,46 @@ function facetsSnippet(_rewrite) {
 }
 
 let demoState = { chips: [], suggest: [], open: false, gen: 0 };
+let demoEngine = "lucene";
+let esStatus = { url: "http://localhost:9200/", apiKeySet: false, ready: false, error: null, docs: 0 };
+
+function demoBackend() {
+  return demoEngine === "elasticsearch" && esStatus.ready ? "elasticsearch" : "lucene";
+}
+
+function demoApi(path) {
+  const backend = demoBackend();
+  return backend === "elasticsearch" ? `${path}?backend=elasticsearch` : path;
+}
+
+function setDemoBackend(backend) {
+  demoEngine = backend === "elasticsearch" && esStatus.ready ? "elasticsearch" : "lucene";
+  const host = document.getElementById("demo-backend");
+  if (host) {
+    host.dataset.backend = demoEngine;
+    host.querySelectorAll("[data-backend]").forEach((button) => {
+      const on = button.dataset.backend === demoEngine;
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    const esButton = host.querySelector("[data-backend=elasticsearch]");
+    if (esButton) {
+      esButton.classList.toggle("is-wait", !esStatus.ready);
+      esButton.title = esStatus.ready
+          ? "Search with Elasticsearch"
+          : "Configure Elasticsearch";
+    }
+  }
+  syncDemoEngine();
+}
+
+function syncDemoEngine() {
+  const backend = demoBackend();
+  const lcdTitle = document.querySelector(".lcd h2");
+  if (lcdTitle) {
+    lcdTitle.textContent = backend === "elasticsearch" ? "Elasticsearch" : "Lucene playground";
+  }
+}
 
 function demoClauses() {
   const filters = {};
@@ -1670,7 +1741,7 @@ async function runDemoSuggest() {
     hideDemoSuggest();
     return;
   }
-  const data = await getJson("/api/suggest", {
+  const data = await getJson(demoApi("/api/suggest"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prefix })
@@ -1724,30 +1795,53 @@ async function runDemo() {
   const q = input.value;
   const { filters, mustNots } = demoClauses();
   const gen = ++demoState.gen;
-  const [search, facets] = await Promise.all([
-    getJson("/api/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q, filters, mustNots })
-    }),
-    getJson("/api/facets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q, filters, mustNots, drillGenre: "" })
-    })
-  ]);
-  if (gen !== demoState.gen) {
-    return;
+  try {
+    const [search, facets] = await Promise.all([
+      getJson(demoApi("/api/search"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, filters, mustNots })
+      }),
+      getJson(demoApi("/api/facets"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, filters, mustNots, drillGenre: "" })
+      })
+    ]);
+    if (gen !== demoState.gen) {
+      return;
+    }
+    renderDemoChips();
+    renderDemoFacets(facets.dims || []);
+    renderDemoHits(search);
+    setDemoReadout(search, facets);
+    setCues(search.tokens || []);
+    setSnippet(demoSnippet(q, search, facets));
+  } catch (error) {
+    if (gen !== demoState.gen) {
+      return;
+    }
+    readout(`<p class="muted">${escapeHtml(error.message)}</p>`);
   }
-  renderDemoChips();
-  renderDemoFacets(facets.dims || []);
-  renderDemoHits(search);
-  setDemoReadout(search, facets);
-  setCues(search.tokens || []);
+}
+
+function demoSnippet(q, search, facets) {
+  if (demoBackend() === "elasticsearch") {
+    return [
+      "client.search(s -> s",
+      "        .index(\"tracks\")",
+      "        .query(q -> q.multiMatch(mm -> mm",
+      "                .query(" + javaString(q) + ")",
+      "                .type(TextQueryType.BoolPrefix)",
+      "                .operator(Operator.And)",
+      "                .fields(\"title^4\", \"artist^3\", \"genre^2\"))),",
+      "        Track.class);"
+    ].join("\n");
+  }
   const collector = facets.drillSideways
       ? "new DrillSideways(searcher, config, state).search(drillDown, 1);"
       : "FacetsCollectorManager.search(searcher, q, 1, manager).facetsCollector();";
-  setSnippet([
+  return [
     "Query q = TrackLuceneQueryBuilder.buildStructured(",
     "        " + javaString(q) + ", filters, mustNots);",
     "// " + search.query,
@@ -1755,7 +1849,7 @@ async function runDemo() {
     "UnifiedHighlighter.builder(searcher, analyzer).build()",
     "        .highlightFields(new String[]{\"title\", \"artist\", \"genre\"}, q, hits);",
     collector
-  ].join("\n"));
+  ].join("\n");
 }
 
 function toggleCamelotKey(value, empty) {
@@ -1875,8 +1969,8 @@ function renderDemoHits(search) {
   }
   const hits = search.hits || [];
   total.textContent = hits.length
-      ? `${search.total} hits · showing ${hits.length}`
-      : "no hits";
+      ? `${search.total} hits in ${search.tookMs ?? 0} ms · showing ${hits.length}`
+      : `no hits in ${search.tookMs ?? 0} ms`;
   body.innerHTML = hits.map((hit) => `
     <tr>
       <td>${safeHighlight(hit.highlights?.title || hit.title)}</td>
@@ -1888,9 +1982,12 @@ function renderDemoHits(search) {
 }
 
 function setDemoReadout(search, facets) {
+  const engine = demoBackend() === "elasticsearch"
+      ? "curl"
+      : (facets.drillSideways ? "DrillSideways" : "FacetsCollector");
   readout(`
     <h3>${search.total} hits</h3>
-    <p class="muted">${facets.drillSideways ? "DrillSideways" : "FacetsCollector"}</p>
+    <p class="muted">${engine}</p>
     <pre class="demo-query">${escapeHtml(search.query)}</pre>
     <h3>tokens</h3>
     <p>${(search.tokens || []).map((token) => `<span class="idx-chip">${escapeHtml(token)}</span>`).join(" ") || `<span class="muted">match-all</span>`}</p>`);
@@ -1904,7 +2001,7 @@ function show(name) {
   setSnippet(chapter.snippet);
   document.getElementById("deck-title").textContent = chapter.title;
   document.getElementById("deck-lede").textContent = chapter.lede;
-  document.querySelectorAll(".chapters button").forEach((button) => {
+  document.querySelectorAll(".chapters [data-chapter]").forEach((button) => {
     button.classList.toggle("is-on", button.dataset.chapter === name);
   });
   mixer.classList.toggle("is-analyze", name === "analyze");
@@ -1918,9 +2015,81 @@ function show(name) {
   }
 }
 
-document.querySelectorAll(".chapters button").forEach((button) => {
+document.querySelectorAll(".chapters [data-chapter]").forEach((button) => {
   button.onclick = () => show(button.dataset.chapter);
 });
+
+function applyEsStatus(status) {
+  esStatus = status || esStatus;
+  document.getElementById("es-settings")?.classList.toggle("is-ready", !!esStatus.ready);
+  const url = document.getElementById("es-url");
+  if (url && document.activeElement !== url) {
+    url.value = esStatus.url || "http://localhost:9200/";
+  }
+  const line = document.getElementById("es-status");
+  if (line) {
+    line.classList.remove("is-ok", "is-err");
+    if (esStatus.ready) {
+      line.classList.add("is-ok");
+      line.textContent = `Indexed ${esStatus.docs} tracks`;
+    } else if (esStatus.error) {
+      line.classList.add("is-err");
+      line.textContent = esStatus.error;
+    } else {
+      line.textContent = "Not connected — Lucene still runs the Demo.";
+    }
+  }
+  setDemoBackend(demoEngine);
+}
+
+function bindEsSettings() {
+  const dialog = document.getElementById("es-dialog");
+  const form = document.getElementById("es-form");
+  const gear = document.getElementById("es-settings");
+  const close = document.getElementById("es-close");
+  if (!dialog || !form || !gear) {
+    return;
+  }
+  gear.addEventListener("click", () => {
+    applyEsStatus(esStatus);
+    document.getElementById("es-api-key").value = "";
+    document.getElementById("es-api-key").placeholder = esStatus.apiKeySet
+        ? "unchanged — paste a new key to replace"
+        : "paste start-local API key";
+    dialog.showModal();
+  });
+  close?.addEventListener("click", () => dialog.close());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const line = document.getElementById("es-status");
+    if (line) {
+      line.classList.remove("is-ok", "is-err");
+      line.textContent = "Connecting and indexing…";
+    }
+    try {
+      const status = await getJson("/api/elasticsearch", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: document.getElementById("es-url").value,
+          apiKey: document.getElementById("es-api-key").value
+        })
+      });
+      applyEsStatus(status);
+      if (status.ready) {
+        setDemoBackend("elasticsearch");
+        runDemo();
+      }
+    } catch (error) {
+      if (line) {
+        line.classList.add("is-err");
+        line.textContent = error.message;
+      }
+    }
+  });
+}
+
+getJson("/api/elasticsearch").then(applyEsStatus).catch(() => {});
 
 getJson("/api/meta").then((meta) => {
   document.getElementById("meta").textContent =
@@ -1935,6 +2104,7 @@ show(new URLSearchParams(location.search).get("chapter") in chapters
 
 bindColumnResize();
 bindZoneZoom();
+bindEsSettings();
 
 function setZoneZoom(zone) {
   const mixer = document.querySelector(".mixer");

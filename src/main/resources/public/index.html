@@ -27,7 +27,12 @@
     <button type="button" data-chapter="facets">5 Facets</button>
     <button type="button" data-chapter="suggest">6 Suggest</button>
     <button type="button" data-chapter="highlight">7 Highlighting</button>
-    <button type="button" data-chapter="demo">Demo</button>
+    <div class="demo-cluster">
+      <button type="button" data-chapter="demo">Demo</button>
+      <button type="button" id="es-settings" class="es-gear" aria-label="Elasticsearch settings" title="Elasticsearch settings">
+        <i class="fa-solid fa-gear"></i>
+      </button>
+    </div>
   </nav>
 
   <main class="mixer">
@@ -72,6 +77,30 @@
   <footer>
     Built on Lucene {{lucene.version}} by <a href="https://david.pilato.fr/">David Pilato</a>
   </footer>
+  <dialog id="es-dialog" class="es-dialog">
+    <form id="es-form">
+      <h2>Elasticsearch</h2>
+      <label class="field">URL
+        <input id="es-url" type="text" value="http://localhost:9200/" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">API Key
+        <input id="es-api-key" type="password" value="" autocomplete="off" placeholder="paste start-local API key">
+      </label>
+      <p id="es-status" class="es-status"></p>
+      <div class="es-actions">
+        <button type="submit" class="ghost">Save and index</button>
+        <button type="button" class="ghost" id="es-close">Close</button>
+      </div>
+      <div class="es-help">
+        <p>Start a local cluster with <a href="https://github.com/elastic/start-local">start-local</a>:</p>
+        <pre>curl -fsSL https://elastic.co/start-local | sh -s -- --esonly
+cat elastic-start-local/.env | grep ES_LOCAL_API_KEY</pre>
+        <p>Then paste the API Key in the field above. <code>./start.sh</code> also reads
+          <code>.env</code> / <code>elastic-start-local/.env</code> (<code>ES_LOCAL_URL</code>,
+          <code>ES_LOCAL_API_KEY</code>) when you boot the playground.</p>
+      </div>
+    </form>
+  </dialog>
   <script src="/playground.js"></script>
 </body>
 </html>

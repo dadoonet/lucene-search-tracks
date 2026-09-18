@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import static fr.pilato.test.lucene.playground.PlaygroundModels.AnalyzeRequest;
+import static fr.pilato.test.lucene.playground.PlaygroundModels.ElasticsearchSettingsRequest;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetsRequest;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.MapRequest;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.SearchRequest;
@@ -49,10 +50,19 @@ public final class PlaygroundApp {
     public static Javalin create(PlaygroundService service) {
         return Javalin.create(config -> {
             config.staticFiles.add("/public", Location.CLASSPATH);
+            config.routes.exception(ElasticsearchNotReadyException.class, (e, ctx) ->
+                    ctx.status(409).json(Map.of("error", String.valueOf(e.getMessage()))));
             config.routes.exception(Exception.class, (e, ctx) ->
                     ctx.status(500).json(Map.of("error", String.valueOf(e.getMessage()))));
             config.routes.get("/", ctx -> ctx.html(indexHtml()));
             config.routes.get("/api/meta", ctx -> ctx.json(service.meta()));
+            config.routes.get("/api/elasticsearch", ctx -> ctx.json(service.elasticsearch()));
+            config.routes.put("/api/elasticsearch", ctx -> {
+                ElasticsearchSettingsRequest body = ctx.bodyAsClass(ElasticsearchSettingsRequest.class);
+                ctx.json(service.connectElasticsearch(
+                        body == null ? null : body.url(),
+                        body == null ? null : body.apiKey()));
+            });
             config.routes.get("/api/analyze", ctx ->
                     ctx.json(service.analyze(ctx.queryParam("text"))));
             config.routes.post("/api/analyze", ctx -> {
@@ -68,23 +78,25 @@ public final class PlaygroundApp {
             config.routes.get("/api/index", ctx ->
                     ctx.json(service.invertedIndex(ctx.queryParam("term"), ctx.queryParam("field"))));
             config.routes.get("/api/search", ctx -> ctx.json(service.search(fromQuery(ctx.queryParam("q"),
-                    ctx.queryParam("genre"), ctx.queryParam("minusKey"), ctx.queryParam("explainDoc")))));
+                    ctx.queryParam("genre"), ctx.queryParam("minusKey"), ctx.queryParam("explainDoc")),
+                    ctx.queryParam("backend"))));
             config.routes.post("/api/search", ctx ->
-                    ctx.json(service.search(ctx.bodyAsClass(SearchRequest.class))));
+                    ctx.json(service.search(ctx.bodyAsClass(SearchRequest.class), ctx.queryParam("backend"))));
             config.routes.get("/api/suggest", ctx ->
-                    ctx.json(service.suggest(ctx.queryParam("prefix"))));
+                    ctx.json(service.suggest(ctx.queryParam("prefix"), ctx.queryParam("backend"))));
             config.routes.post("/api/suggest", ctx -> {
                 SuggestRequest body = ctx.bodyAsClass(SuggestRequest.class);
-                ctx.json(service.suggest(body == null ? "" : body.prefix()));
+                ctx.json(service.suggest(body == null ? "" : body.prefix(), ctx.queryParam("backend")));
             });
             config.routes.get("/api/facets", ctx ->
-                    ctx.json(service.facets(ctx.queryParam("q"), ctx.queryParam("drillGenre"))));
+                    ctx.json(service.facets(ctx.queryParam("q"), ctx.queryParam("drillGenre"), ctx.queryParam("backend"))));
             config.routes.post("/api/facets", ctx -> {
                 FacetsRequest body = ctx.bodyAsClass(FacetsRequest.class);
                 ctx.json(service.facets(
                         body == null ? "" : body.q(),
                         facetFilters(body),
-                        body == null || body.mustNots() == null ? Map.of() : body.mustNots()));
+                        body == null || body.mustNots() == null ? Map.of() : body.mustNots(),
+                        ctx.queryParam("backend")));
             });
         });
     }

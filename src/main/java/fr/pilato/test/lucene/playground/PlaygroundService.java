@@ -94,6 +94,7 @@ public final class PlaygroundService implements AutoCloseable {
     private final Map<String, Track> byId;
     private final TrackSearchLuceneImpl index;
     private final PlaygroundLuceneHelper luceneIndex;
+    private final PlaygroundElasticsearch elasticsearch;
     private final String heapSize;
     private final long builtInMs;
 
@@ -110,6 +111,7 @@ public final class PlaygroundService implements AutoCloseable {
         }
         this.index = index;
         this.luceneIndex = luceneIndex;
+        this.elasticsearch = new PlaygroundElasticsearch(this.corpus, ElasticsearchSettings.fromEnv());
         this.heapSize = heapSize;
         this.builtInMs = builtInMs;
     }
@@ -121,13 +123,34 @@ public final class PlaygroundService implements AutoCloseable {
         long start = System.nanoTime();
         index.rebuild(corpus);
         luceneIndex.rebuild(corpus);
-        long builtInMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        long luceneMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        System.out.println(IndexTiming.indexed("Lucene", corpus.size(), luceneMs));
         String heapSize = RamUsageEstimator.humanReadableUnits(luceneIndex.ramBytesUsed()).trim();
-        return new PlaygroundService(corpus, index, luceneIndex, heapSize, builtInMs);
+        PlaygroundService service = new PlaygroundService(corpus, index, luceneIndex, heapSize, luceneMs);
+        var es = service.elasticsearch();
+        if (ElasticsearchSettings.fromEnv().hasCredentials()) {
+            var status = service.connectElasticsearch(es.url(), null);
+            if (!status.ready()) {
+                System.out.println("Elasticsearch skipped: " + status.error());
+            }
+        }
+        return service;
     }
 
     public MetaResponse meta() {
         return new MetaResponse(luceneIndex.numDocs(), "ByteBuffersDirectory", heapSize, builtInMs);
+    }
+
+    public PlaygroundModels.ElasticsearchStatus elasticsearch() {
+        return elasticsearch.status();
+    }
+
+    public PlaygroundModels.ElasticsearchStatus connectElasticsearch(String url, String apiKey) {
+        return elasticsearch.connect(url, apiKey);
+    }
+
+    public PlaygroundModels.ElasticsearchStatus disconnectElasticsearch() {
+        return elasticsearch.disconnect();
     }
 
     public AnalyzeResponse analyze(String text) {
@@ -255,7 +278,19 @@ public final class PlaygroundService implements AutoCloseable {
         }
     }
 
+    public SearchResponse search(SearchRequest request, String backend) throws IOException {
+        long start = System.nanoTime();
+        SearchResponse response = isElasticsearch(backend)
+                ? elasticsearch.search(request)
+                : searchLucene(request);
+        return withTook(response, start);
+    }
+
     public SearchResponse search(SearchRequest request) throws IOException {
+        return search(request, null);
+    }
+
+    private SearchResponse searchLucene(SearchRequest request) throws IOException {
         String q = request == null || request.q() == null ? "" : request.q();
         Map<String, List<String>> filters = request == null || request.filters() == null
                 ? Map.of() : request.filters();
@@ -305,8 +340,20 @@ public final class PlaygroundService implements AutoCloseable {
                     tokens,
                     lucene.toString(),
                     total,
-                    List.copyOf(hits));
+                    List.copyOf(hits),
+                    0);
         }
+    }
+
+    private static SearchResponse withTook(SearchResponse response, long startNanos) {
+        long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+        return new SearchResponse(
+                response.q(),
+                response.tokens(),
+                response.query(),
+                response.total(),
+                response.hits(),
+                tookMs);
     }
 
     private static SearchHitView searchHit(
@@ -354,7 +401,14 @@ public final class PlaygroundService implements AutoCloseable {
         }
     }
 
-    public SuggestResponse suggest(String prefix) throws IOException {
+    public SuggestResponse suggest(String prefix) throws Exception {
+        return suggest(prefix, null);
+    }
+
+    public SuggestResponse suggest(String prefix, String backend) throws Exception {
+        if (isElasticsearch(backend)) {
+            return elasticsearch.suggest(prefix);
+        }
         String value = prefix == null ? "" : prefix;
         List<SuggestHitView> hits = new ArrayList<>();
         for (TrackSuggestion suggestion : index.suggest(value)) {
@@ -363,16 +417,29 @@ public final class PlaygroundService implements AutoCloseable {
         return new SuggestResponse(value, List.copyOf(hits));
     }
 
-    public FacetsResponse facets(String q, String drillGenre) throws IOException {
+    public FacetsResponse facets(String q, String drillGenre) throws Exception {
+        return facets(q, drillGenre, null);
+    }
+
+    public FacetsResponse facets(String q, String drillGenre, String backend) throws Exception {
         Map<String, List<String>> filters = drillGenre == null || drillGenre.isBlank()
                 ? Map.of()
                 : Map.of("genre", List.of(drillGenre));
-        return facets(q, filters, Map.of());
+        return facets(q, filters, Map.of(), backend);
     }
 
     public FacetsResponse facets(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws IOException {
+            throws Exception {
+        return facets(q, filters, mustNots, null);
+    }
+
+    public FacetsResponse facets(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, String backend)
+            throws Exception {
+        if (isElasticsearch(backend)) {
+            return elasticsearch.facets(q, filters, mustNots);
+        }
         String queryText = q == null ? "" : q;
         Map<String, List<String>> include = filters == null ? Map.of() : filters;
         Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
@@ -424,8 +491,16 @@ public final class PlaygroundService implements AutoCloseable {
         try {
             index.close();
         } finally {
-            luceneIndex.close();
+            try {
+                luceneIndex.close();
+            } finally {
+                elasticsearch.close();
+            }
         }
+    }
+
+    private static boolean isElasticsearch(String backend) {
+        return backend != null && "elasticsearch".equalsIgnoreCase(backend.trim());
     }
 
     private static Facets mix(DefaultSortedSetDocValuesReaderState state, FacetsCollector hits)
