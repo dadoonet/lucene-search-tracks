@@ -10,7 +10,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
 
-    private static final String IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.5.2";
+    private static final String IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.5.4";
 
     @Container
     static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(IMAGE);

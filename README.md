@@ -14,7 +14,7 @@ mvn compile exec:java
 ```
 
 Requires **Java 25**. Elasticsearch tests also need Docker (image
-`docker.elastic.co/elasticsearch/elasticsearch:9.5.2`). The NDJSON is a
+`docker.elastic.co/elasticsearch/elasticsearch:9.5.4`). The NDJSON is a
 snapshot of a local Rekordbox library; tests never open SQLCipher. Each test
 prints an emoji narrative of the query and the top hits.
 

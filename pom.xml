@@ -19,7 +19,7 @@
         <jackson.version>2.22.2</jackson.version>
         <javalin.version>7.2.3</javalin.version>
         <slf4j.version>2.0.17</slf4j.version>
-        <elasticsearch.version>9.5.2</elasticsearch.version>
+        <elasticsearch.version>9.5.4</elasticsearch.version>
         <testcontainers.version>2.0.5</testcontainers.version>
     </properties>
 
