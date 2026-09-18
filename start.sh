@@ -20,3 +20,4 @@ if [[ -n "${ES_LOCAL_URL:-}" || -n "${ES_LOCAL_PASSWORD:-}" ]]; then
 fi
 
 exec mvn compile exec:java "$@"
+open http://localhost:7171
