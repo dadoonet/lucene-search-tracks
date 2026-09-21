@@ -581,19 +581,21 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
                         ordered.add(new TrackHit(track, hit.score, snippets));
                     }
                 }
-                this.hits = List.copyOf(ordered);
-                this.totalHits = Math.toIntExact(topDocs.totalHits.value());
+                int nextTotalHits = Math.toIntExact(topDocs.totalHits.value());
                 FacetResult genres = luceneFacets.getAllChildren(TrackFacets.GENRE);
                 FacetResult bpm = luceneFacets.getAllChildren("bpm");
                 FacetResult rating = luceneFacets.getAllChildren("rating");
                 FacetResult year = luceneFacets.getAllChildren("year");
                 FacetResult keys = luceneFacets.getAllChildren(TrackFacets.KEY);
-                this.facets = new TrackFacetsResult(
+                TrackFacetsResult nextFacets = new TrackFacetsResult(
                         toMap(genres),
                         toMap(bpm),
                         toMap(rating),
                         decades(year),
                         toMap(keys));
+                this.hits = List.copyOf(ordered);
+                this.totalHits = nextTotalHits;
+                this.facets = nextFacets;
                 this.executed = true;
             }
         }

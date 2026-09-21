@@ -190,18 +190,20 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                     ordered.add(new TrackHit(hit.source(), score(hit), highlightMap(hit.highlight())));
                 }
             }
-            this.hits = List.copyOf(ordered);
-            this.totalHits = (int) response.hits().total().value();
+            int nextTotalHits = (int) response.hits().total().value();
 
             SearchResponse<Track> facetResponse = client.search(facetRequest(q, filters, mustNots), Track.class);
             Map<String, Aggregate> aggs = facetResponse.aggregations();
             Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
-            this.facets = new TrackFacetsResult(
+            TrackFacetsResult nextFacets = new TrackFacetsResult(
                     nestedTerms(aggs.get("genre"), "genre"),
                     rangeMap(metrics.get("bpm")),
                     terms(metrics.get("rating")),
                     decades(metrics.get("year")),
                     nestedTerms(aggs.get("key"), "key"));
+            this.hits = List.copyOf(ordered);
+            this.totalHits = nextTotalHits;
+            this.facets = nextFacets;
             this.executed = true;
         }
 

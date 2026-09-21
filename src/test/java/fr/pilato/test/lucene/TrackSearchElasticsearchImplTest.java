@@ -1,6 +1,8 @@
 package fr.pilato.test.lucene;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -8,9 +10,13 @@ import org.testcontainers.elasticsearch.ElasticsearchContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.io.IOException;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
@@ -55,5 +61,34 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
                 .contains("aggregations")
                 .contains("120 – 130")
                 .contains("multi_match");
+    }
+
+    @Test
+    void session_failedRerunAfterHits_keepsPreviousCompleteResults() throws Exception {
+        AtomicInteger searches = new AtomicInteger();
+        ElasticsearchClient failing = new ElasticsearchClient(client._transport()) {
+            @Override
+            public <TDocument> SearchResponse<TDocument> search(
+                    SearchRequest request, Class<TDocument> tDocumentClass) throws IOException {
+                if (searches.incrementAndGet() == 4) {
+                    throw new IOException("facet request failed");
+                }
+                return super.search(request, tDocumentClass);
+            }
+        };
+        TrackSearch engine = new TrackSearchElasticsearchImpl(failing);
+        TrackSearchSession session = engine.prepareRequest("Bob", Map.of(), Map.of(), 25);
+        session.execute();
+        List<TrackHit> previousHits = session.getHits();
+        int previousTotal = session.totalHits();
+        TrackFacetsResult previousFacets = session.getFacets();
+        assertThatThrownBy(session::execute)
+                .isInstanceOf(IOException.class)
+                .hasMessage("facet request failed");
+        assertThat(session.getHits()).isSameAs(previousHits);
+        assertThat(session.totalHits()).isEqualTo(previousTotal);
+        assertThat(session.getFacets()).isSameAs(previousFacets);
+        assertThat(session.getHits()).hasSize(25);
+        assertThat(session.totalHits()).isEqualTo(62);
     }
 }
