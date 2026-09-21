@@ -115,6 +115,11 @@ class PlaygroundAppTest {
                     .contains("highlightJson")
                     .contains("playground-lcd-query-ratio")
                     .contains("bindLcdSplit")
+                    .contains("class=\"lcd-split\"")
+                    .contains("lcd-split-handle")
+                    .contains("#readout .lcd-split")
+                    .contains("split.getBoundingClientRect()")
+                    .doesNotContain("readoutEl.getBoundingClientRect()")
                     .doesNotContain("getJson(demoApi(\"/api/facets\")")
                     .contains("mustNots")
                     .contains("fa-music")
@@ -228,7 +233,8 @@ class PlaygroundAppTest {
             var response = client.get("/playground.css");
             assertThat(response.code()).isEqualTo(200);
             assertThat(response.body().string())
-                    .contains(".demo-split")
+                    .contains(".lcd-split")
+                    .contains(".lcd-split-handle")
                     .contains("json-key")
                     .contains("row-resize");
         });

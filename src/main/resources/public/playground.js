@@ -1989,9 +1989,9 @@ function setDemoReadout(search) {
   readout(`
     <h3>${search.total} hits</h3>
     <p class="muted">${escapeHtml(engine)}</p>
-    <div class="demo-split">
+    <div class="lcd-split">
       <pre class="demo-query">${escapeHtml(query)}</pre>
-      <div class="splitter demo-split-handle" id="lcd-split" role="separator" aria-orientation="horizontal" aria-label="Resize query and response" tabindex="0"></div>
+      <div class="splitter lcd-split-handle" id="lcd-split" role="separator" aria-orientation="horizontal" aria-label="Resize query and response" tabindex="0"></div>
       <pre class="demo-response">${highlightJson(response)}</pre>
     </div>`);
   bindLcdSplit();
@@ -2220,10 +2220,9 @@ function bindColumnResize() {
 }
 
 function bindLcdSplit() {
-  const split = document.querySelector("#readout .demo-split");
+  const split = document.querySelector("#readout .lcd-split");
   const handle = document.getElementById("lcd-split");
-  const readoutEl = document.getElementById("readout");
-  if (!split || !handle || !readoutEl) {
+  if (!split || !handle) {
     return;
   }
   const applyRatio = (ratio) => {
@@ -2234,7 +2233,7 @@ function bindLcdSplit() {
   applyRatio(Number(localStorage.getItem("playground-lcd-query-ratio") || "0.45") || 0.45);
 
   const apply = (clientY) => {
-    const rect = readoutEl.getBoundingClientRect();
+    const rect = split.getBoundingClientRect();
     applyRatio((clientY - rect.top) / rect.height);
   };
 
