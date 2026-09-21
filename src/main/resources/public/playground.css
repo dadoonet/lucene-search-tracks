@@ -917,6 +917,58 @@ input[type="text"], input[type="password"], select {
   color: var(--phosphor);
 }
 
+#readout .demo-split {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+#readout .demo-split .demo-query {
+  flex: 0 0 var(--lcd-query-ratio, 45%);
+  min-height: 4rem;
+  overflow: auto;
+}
+
+.demo-split-handle {
+  flex: 0 0 10px;
+  cursor: row-resize;
+  margin: 0;
+}
+
+.demo-split-handle::before {
+  inset: 4px 10%;
+}
+
+#readout .demo-split .demo-response {
+  flex: 1 1 auto;
+  min-height: 4rem;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--phosphor);
+}
+
+.demo-response .json-key { color: var(--phosphor-dim); }
+.demo-response .json-string { color: var(--phosphor); }
+.demo-response .json-number { color: var(--cue); }
+.demo-response .json-literal { color: var(--phosphor-dim); }
+
+body.is-row-resize {
+  cursor: row-resize;
+  user-select: none;
+}
+
+body.is-row-resize * {
+  cursor: row-resize !important;
+}
+
+.mixer.is-max-lcd .demo-split-handle {
+  display: block;
+}
+
 .cues {
   position: absolute;
   inset: 0.4rem 0.5rem;
@@ -1059,6 +1111,11 @@ input[type="text"], input[type="password"], select {
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.lcd:has(.demo-split) #readout {
+  display: flex;
+  flex-direction: column;
 }
 
 #readout h3 {

@@ -110,6 +110,12 @@ class PlaygroundAppTest {
                     .contains("toggleDemoChip")
                     .contains("demo-suggest")
                     .contains("/api/facets")
+                    .contains("search.dims")
+                    .contains("demo-response")
+                    .contains("highlightJson")
+                    .contains("playground-lcd-query-ratio")
+                    .contains("bindLcdSplit")
+                    .doesNotContain("getJson(demoApi(\"/api/facets\")")
                     .contains("mustNots")
                     .contains("fa-music")
                     .contains("fa-tag")
@@ -213,6 +219,18 @@ class PlaygroundAppTest {
             assertThat(js).contains("kicker: \"Part 7 · UnifiedHighlighter\"");
             assertThat(js.indexOf("highlight:")).isGreaterThan(js.indexOf("suggest:"));
             assertThat(js.indexOf("demo:")).isGreaterThan(js.indexOf("highlight:"));
+        });
+    }
+
+    @Test
+    void playgroundCss_demoSplitAndJsonTokens() {
+        JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
+            var response = client.get("/playground.css");
+            assertThat(response.code()).isEqualTo(200);
+            assertThat(response.body().string())
+                    .contains(".demo-split")
+                    .contains("json-key")
+                    .contains("row-resize");
         });
     }
 

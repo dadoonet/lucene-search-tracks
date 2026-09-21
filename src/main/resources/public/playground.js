@@ -1796,27 +1796,21 @@ async function runDemo() {
   const { filters, mustNots } = demoClauses();
   const gen = ++demoState.gen;
   try {
-    const [search, facets] = await Promise.all([
-      getJson(demoApi("/api/search"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q, filters, mustNots })
-      }),
-      getJson(demoApi("/api/facets"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q, filters, mustNots, drillGenre: "" })
-      })
-    ]);
+    const search = await getJson(demoApi("/api/search"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q, filters, mustNots })
+    });
     if (gen !== demoState.gen) {
       return;
     }
     renderDemoChips();
-    renderDemoFacets(facets.dims || []);
+    renderDemoFacets(search.dims || []);
     renderDemoHits(search);
-    setDemoReadout(search, facets);
+    setDemoReadout(search);
     setCues(search.tokens || []);
-    setSnippet(demoSnippet(q, search, facets));
+    const drillSideways = Boolean((filters.genre && filters.genre.length) || (filters.key && filters.key.length));
+    setSnippet(demoSnippet(q, search, { drillSideways }));
   } catch (error) {
     if (gen !== demoState.gen) {
       return;
@@ -1825,7 +1819,7 @@ async function runDemo() {
   }
 }
 
-function demoSnippet(q, search, facets) {
+function demoSnippet(q, search, { drillSideways } = {}) {
   if (demoBackend() === "elasticsearch") {
     return [
       "client.search(s -> s",
@@ -1838,7 +1832,7 @@ function demoSnippet(q, search, facets) {
       "        Track.class);"
     ].join("\n");
   }
-  const collector = facets.drillSideways
+  const collector = drillSideways
       ? "new DrillSideways(searcher, config, state).search(drillDown, 1);"
       : "FacetsCollectorManager.search(searcher, q, 1, manager).facetsCollector();";
   return [
@@ -1981,12 +1975,48 @@ function renderDemoHits(search) {
     </tr>`).join("");
 }
 
-function setDemoReadout(search, facets) {
+function setDemoReadout(search) {
   const engine = demoBackend() === "elasticsearch" ? "Elasticsearch" : "Lucene";
+  const query = search.query || "";
+  const response = search.response || "";
+  if (!response) {
+    readout(`
+      <h3>${search.total} hits</h3>
+      <p class="muted">${escapeHtml(engine)}</p>
+      <pre class="demo-query">${escapeHtml(query)}</pre>`);
+    return;
+  }
   readout(`
     <h3>${search.total} hits</h3>
     <p class="muted">${escapeHtml(engine)}</p>
-    <pre class="demo-query">${escapeHtml(search.query || "")}</pre>`);
+    <div class="demo-split">
+      <pre class="demo-query">${escapeHtml(query)}</pre>
+      <div class="splitter demo-split-handle" id="lcd-split" role="separator" aria-orientation="horizontal" aria-label="Resize query and response" tabindex="0"></div>
+      <pre class="demo-response">${highlightJson(response)}</pre>
+    </div>`);
+  bindLcdSplit();
+}
+
+function highlightJson(json) {
+  const src = json || "";
+  const token = /("(?:\\.|[^"\\])*")\s*:|("(?:\\.|[^"\\])*")|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|\b(?:true|false|null)\b/g;
+  let out = "";
+  let last = 0;
+  let match;
+  while ((match = token.exec(src))) {
+    out += escapeHtml(src.slice(last, match.index));
+    if (match[1] !== undefined) {
+      out += `<span class="json-key">${escapeHtml(match[1])}</span>:`;
+    } else if (match[2] !== undefined) {
+      out += `<span class="json-string">${escapeHtml(match[2])}</span>`;
+    } else if (match[0] === "true" || match[0] === "false" || match[0] === "null") {
+      out += `<span class="json-literal">${match[0]}</span>`;
+    } else {
+      out += `<span class="json-number">${escapeHtml(match[0])}</span>`;
+    }
+    last = match.index + match[0].length;
+  }
+  return out + escapeHtml(src.slice(last));
 }
 
 function show(name) {
@@ -2186,5 +2216,58 @@ function bindColumnResize() {
     const stageWidth = mixer.querySelector(".stage").getBoundingClientRect().width;
     const delta = event.key === "ArrowRight" ? 32 : -32;
     apply(mixer.getBoundingClientRect().left + stageWidth + delta);
+  });
+}
+
+function bindLcdSplit() {
+  const split = document.querySelector("#readout .demo-split");
+  const handle = document.getElementById("lcd-split");
+  const readoutEl = document.getElementById("readout");
+  if (!split || !handle || !readoutEl) {
+    return;
+  }
+  const applyRatio = (ratio) => {
+    const clamped = Math.min(0.8, Math.max(0.2, ratio));
+    split.style.setProperty("--lcd-query-ratio", `${Math.round(clamped * 100)}%`);
+    localStorage.setItem("playground-lcd-query-ratio", String(clamped));
+  };
+  applyRatio(Number(localStorage.getItem("playground-lcd-query-ratio") || "0.45") || 0.45);
+
+  const apply = (clientY) => {
+    const rect = readoutEl.getBoundingClientRect();
+    applyRatio((clientY - rect.top) / rect.height);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    handle.classList.add("is-dragging");
+    document.body.classList.add("is-row-resize");
+    handle.setPointerCapture(event.pointerId);
+    apply(event.clientY);
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) {
+      return;
+    }
+    apply(event.clientY);
+  });
+  const stop = (event) => {
+    handle.classList.remove("is-dragging");
+    document.body.classList.remove("is-row-resize");
+    if (handle.hasPointerCapture(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+  };
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      return;
+    }
+    event.preventDefault();
+    const current = Number(localStorage.getItem("playground-lcd-query-ratio") || "0.45") || 0.45;
+    applyRatio(current + (event.key === "ArrowDown" ? 0.04 : -0.04));
   });
 }
