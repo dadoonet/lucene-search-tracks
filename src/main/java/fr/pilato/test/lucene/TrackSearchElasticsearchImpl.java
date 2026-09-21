@@ -83,12 +83,20 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         SearchResponse<Track> response = client.search(s -> s
                         .index(INDEX)
                         .size(10_000)
-                        .query(query(q, filters, mustNots)),
+                        .query(query(q, filters, mustNots))
+                        .highlight(h -> h
+                                .preTags("<b>")
+                                .postTags("</b>")
+                                .numberOfFragments(0)
+                                .fields(
+                                        NamedValue.of("title", HighlightField.of(f -> f)),
+                                        NamedValue.of("artist", HighlightField.of(f -> f)),
+                                        NamedValue.of("genre", HighlightField.of(f -> f)))),
                 Track.class);
         List<TrackHit> hits = new ArrayList<>();
         for (Hit<Track> hit : response.hits().hits()) {
             if (hit.source() != null) {
-                hits.add(new TrackHit(hit.source(), score(hit)));
+                hits.add(new TrackHit(hit.source(), score(hit), highlightMap(hit.highlight())));
             }
         }
         return List.copyOf(hits);
@@ -436,5 +444,21 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     private static float score(Hit<Track> hit) {
         return hit.score() == null ? 0f : hit.score().floatValue();
+    }
+
+    private static Map<String, String> highlightMap(Map<String, List<String>> highlight) {
+        if (highlight == null || highlight.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        highlight.forEach((field, fragments) -> {
+            if (fragments != null && !fragments.isEmpty()) {
+                String snippet = fragments.getFirst();
+                if (snippet != null && !snippet.isBlank()) {
+                    out.put(field, snippet);
+                }
+            }
+        });
+        return out;
     }
 }

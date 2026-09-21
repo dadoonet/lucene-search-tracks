@@ -65,6 +65,28 @@ public abstract class TrackSearchContractTest {
     }
 
     @Test
+    void yearJunkChip_matchesNothing() throws Exception {
+        assertThat(index().search("", Map.of("year", List.of("0–9")), Map.of())).isEmpty();
+    }
+
+    @Test
+    void bpmChip_keepsOnlyThatRange() throws Exception {
+        List<TrackHit> hits = index().search("Bob", Map.of("bpm", List.of("120 – 130")), Map.of());
+        assertThat(hits).isNotEmpty().allMatch(h -> h.track().bpm() >= 120 && h.track().bpm() < 130);
+    }
+
+    @Test
+    void bob_highlightsTitle() throws Exception {
+        assertThat(index().search("Bob", Map.of(), Map.of()))
+                .filteredOn(hit -> "Free (Bob Sinclar Remix)".equals(hit.track().title()))
+                .isNotEmpty()
+                .allSatisfy(hit -> {
+                    assertThat(hit.highlights().get("title")).containsIgnoringCase("bob");
+                    assertThat(hit.highlights().get("title")).contains("<b>");
+                });
+    }
+
+    @Test
     void bob_countsGenreBpmRatingYear() throws Exception {
         TrackFacetsResult facets = index().facets("Bob", Map.of());
         assertThat(facets.genres()).containsKey("Club");

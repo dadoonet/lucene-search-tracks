@@ -45,6 +45,8 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.uhighlight.UnifiedHighlighter;
+import org.apache.lucene.search.uhighlight.WholeBreakIterator;
 import org.apache.lucene.search.suggest.InputIterator;
 import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.search.suggest.analyzing.AnalyzingInfixSuggester;
@@ -81,6 +83,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     private static final float LABEL_BOOST = 1.0f;
     private static final float COMMENT_BOOST = 0.5f;
     private static final float PREFIX_BOOST = 0.25f;
+    private static final String[] HIGHLIGHT_FIELDS = {"title", "artist", "genre"};
     private static final FacetsConfig FACETS = new FacetsConfig();
 
     private final Directory directory;
@@ -128,18 +131,49 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         try (IndexReader reader = searcher.getIndexReader()) {
             int limit = Math.max(1, reader.numDocs());
             TopDocs hits = searcher.search(lucene, limit);
+            List<Map<String, String>> highlighted = highlight(searcher, lucene, hits);
             List<TrackHit> ordered = new ArrayList<>();
-            for (ScoreDoc hit : hits.scoreDocs) {
+            for (int i = 0; i < hits.scoreDocs.length; i++) {
+                ScoreDoc hit = hits.scoreDocs[i];
                 IndexableField id = searcher.storedFields().document(hit.doc).getField("id");
                 if (id == null) {
                     continue;
                 }
                 Track track = tracks.get(id.stringValue());
                 if (track != null) {
-                    ordered.add(new TrackHit(track, hit.score));
+                    Map<String, String> snippets =
+                            i < highlighted.size() ? highlighted.get(i) : Map.of();
+                    ordered.add(new TrackHit(track, hit.score, snippets));
                 }
             }
             return List.copyOf(ordered);
+        }
+    }
+
+    private static List<Map<String, String>> highlight(
+            IndexSearcher searcher, Query query, TopDocs topDocs) throws IOException {
+        if (topDocs == null || topDocs.scoreDocs.length == 0) {
+            return List.of();
+        }
+        try (Analyzer analyzer = analyzer()) {
+            UnifiedHighlighter highlighter = UnifiedHighlighter.builder(searcher, analyzer)
+                    .withMaxLength(10_000)
+                    .withBreakIterator(WholeBreakIterator::new)
+                    .build();
+            Map<String, String[]> byField = highlighter.highlightFields(HIGHLIGHT_FIELDS, query, topDocs);
+            List<Map<String, String>> hits = new ArrayList<>(topDocs.scoreDocs.length);
+            for (int i = 0; i < topDocs.scoreDocs.length; i++) {
+                Map<String, String> fields = new LinkedHashMap<>();
+                for (String field : HIGHLIGHT_FIELDS) {
+                    String[] snippets = byField.get(field);
+                    String snippet = snippets == null ? null : snippets[i];
+                    if (snippet != null && !snippet.isBlank()) {
+                        fields.put(field, snippet);
+                    }
+                }
+                hits.add(Map.copyOf(fields));
+            }
+            return List.copyOf(hits);
         }
     }
 
