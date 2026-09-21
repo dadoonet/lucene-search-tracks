@@ -13,6 +13,12 @@ public abstract class TrackSearchContractTest {
     protected abstract TrackSearch index();
 
     @Test
+    void search_hitHasEmptyHighlightsByDefault() throws Exception {
+        TrackHit hit = index().search("Bob", Map.of(), Map.of()).getFirst();
+        assertThat(hit.highlights()).isNotNull();
+    }
+
+    @Test
     void bob_returns62Hits() throws Exception {
         assertThat(search("Bob", Map.of(), Map.of())).hasSize(62);
     }
