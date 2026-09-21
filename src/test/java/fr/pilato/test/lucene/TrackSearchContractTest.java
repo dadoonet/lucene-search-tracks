@@ -70,27 +70,29 @@ public abstract class TrackSearchContractTest {
         assertThat(facets.genres()).containsKey("Club");
         assertThat(facets.genres()).doesNotContainKey("club");
         assertThat(count(facets.genres(), "Club")).isEqualTo(26);
-        assertThat(facets.bpm120to130()).isEqualTo(52);
+        assertThat(facets.bpm().get("120 – 130")).isEqualTo(52L);
         assertThat(count(facets.ratings(), "5")).isEqualTo(13);
-        assertThat(facets.year2020s()).isEqualTo(15);
+        assertThat(facets.years().get("2020–2029")).isEqualTo(15L);
+        assertThat(facets.keys()).isNotEmpty();
+        assertThat(facets.bpm().keySet()).contains("120 – 130");
         TrackTestLog.facets("Bob", List.of(
                 new TrackTestLog.FacetLine("🏷️", "Club", 26),
                 new TrackTestLog.FacetLine("⏱", "120 – 130", 52),
                 new TrackTestLog.FacetLine("⭐", "5", 13),
-                new TrackTestLog.FacetLine("📅", "2020–2029", facets.year2020s())));
+                new TrackTestLog.FacetLine("📅", "2020–2029", facets.years().get("2020–2029"))));
     }
 
     @Test
     void postFilter_keepsOtherGenres() throws Exception {
         TrackFacetsResult facets = index().facets("Bob", Map.of("genre", List.of("Club")));
         assertThat(count(facets.genres(), "Dance")).isGreaterThan(0);
-        assertThat(facets.bpm120to130()).isLessThan(52);
+        assertThat(facets.bpm().getOrDefault("120 – 130", 0L)).isLessThan(52L);
         TrackTestLog.drillSideways(
                 "Bob",
                 "genre",
                 "Club",
                 count(facets.genres(), "Dance"),
-                facets.bpm120to130());
+                facets.bpm().getOrDefault("120 – 130", 0L));
     }
 
     @Test

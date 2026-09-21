@@ -39,6 +39,7 @@ import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
@@ -143,32 +144,49 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     }
 
     @Override
-    public TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws IOException {
+    public TrackFacetsResult facets(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
+            throws IOException {
         IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
         try (IndexReader reader = searcher.getIndexReader()) {
             var state = new DefaultSortedSetDocValuesReaderState(reader, FACETS);
-            Query base = query(q, Map.of(), Map.of());
+            Map<String, List<String>> drill = new LinkedHashMap<>();
+            Map<String, List<String>> baseFilters = new LinkedHashMap<>();
+            if (filters != null) {
+                for (Map.Entry<String, List<String>> entry : filters.entrySet()) {
+                    if (TrackFacets.GENRE.equals(entry.getKey()) || TrackFacets.KEY.equals(entry.getKey())) {
+                        if (entry.getValue() != null && !entry.getValue().isEmpty()) {
+                            drill.put(entry.getKey(), entry.getValue());
+                        }
+                    } else {
+                        baseFilters.put(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            Query base = query(q, baseFilters, mustNots == null ? Map.of() : mustNots);
             Facets luceneFacets;
-            if (postFilters == null || postFilters.isEmpty()) {
+            if (drill.isEmpty()) {
                 FacetsCollector fc = FacetsCollectorManager.search(
                                 searcher, base, 1, new FacetsCollectorManager())
                         .facetsCollector();
                 luceneFacets = mix(state, fc);
             } else {
                 DrillDownQuery drillDown = new DrillDownQuery(FACETS, base);
-                postFilters.forEach((dim, values) ->
+                drill.forEach((dim, values) ->
                         drillDown.add(dim, query("", Map.of(dim, values), Map.of())));
                 luceneFacets = new TrackDrillSideways(searcher, state).search(drillDown, 1).facets;
             }
-            FacetResult genres = luceneFacets.getAllChildren("genre");
+            FacetResult genres = luceneFacets.getAllChildren(TrackFacets.GENRE);
             FacetResult bpm = luceneFacets.getAllChildren("bpm");
             FacetResult rating = luceneFacets.getAllChildren("rating");
             FacetResult year = luceneFacets.getAllChildren("year");
+            FacetResult keys = luceneFacets.getAllChildren(TrackFacets.KEY);
             return new TrackFacetsResult(
                     toMap(genres),
-                    count(bpm, "120 – 130"),
+                    toMap(bpm),
                     toMap(rating),
-                    yearRange(year, 2020, 2029));
+                    decades(year),
+                    toMap(keys));
         }
     }
 
@@ -317,15 +335,9 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         }
         List<Query> parts = new ArrayList<>();
         for (String value : values) {
-            String luceneField = switch (field) {
-                case "title" -> "title.raw.normalized";
-                case "artist" -> "artist.raw.normalized";
-                case "genre" -> "genre.raw.normalized";
-                case "key" -> "key.code";
-                default -> null;
-            };
-            if (luceneField != null) {
-                parts.add(new TermQuery(new Term(luceneField, normalize(value == null ? "" : value))));
+            Query leaf = fieldQuery(field, value == null ? "" : value);
+            if (leaf != null) {
+                parts.add(leaf);
             }
         }
         if (parts.isEmpty()) {
@@ -342,6 +354,47 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return sameField.build();
     }
 
+    private static Query fieldQuery(String field, String value) {
+        return switch (field) {
+            case "title" -> new TermQuery(new Term("title.raw.normalized", normalize(value)));
+            case "artist" -> new TermQuery(new Term("artist.raw.normalized", normalize(value)));
+            case "genre" -> new TermQuery(new Term("genre.raw.normalized", normalize(value)));
+            case "key" -> new TermQuery(new Term("key.code", normalize(value)));
+            case "bpm" -> bpmRange(value);
+            case "rating" -> ratingExact(value);
+            case "year" -> yearDecade(value);
+            default -> null;
+        };
+    }
+
+    private static Query bpmRange(String label) {
+        for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
+            if (range.label().equals(label)) {
+                double max = Double.isInfinite(range.max())
+                        ? Double.POSITIVE_INFINITY
+                        : Math.nextDown(range.max());
+                return DoubleField.newRangeQuery("bpm", range.min(), max);
+            }
+        }
+        return null;
+    }
+
+    private static Query ratingExact(String label) {
+        try {
+            return IntField.newExactQuery("rating", Integer.parseInt(label.trim()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Query yearDecade(String label) {
+        int[] bounds = TrackFacets.decadeBounds(label);
+        if (bounds == null) {
+            return new MatchNoDocsQuery();
+        }
+        return IntField.newRangeQuery("year", bounds[0], bounds[1]);
+    }
+
     private static Document toDocument(Track t) {
         Document doc = new Document();
         doc.add(new StringField("id", t.id(), Field.Store.YES));
@@ -354,6 +407,10 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         String genre = nfc(t.genre());
         if (!genre.isEmpty()) {
             doc.add(new SortedSetDocValuesFacetField("genre", genre));
+        }
+        String key = t.key();
+        if (key != null && !key.isBlank()) {
+            doc.add(new SortedSetDocValuesFacetField("key", key));
         }
         addText(doc, "album", t.album());
         addText(doc, "label", t.label());
@@ -417,25 +474,19 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return List.copyOf(tokens);
     }
 
-    private static DoubleRange[] bpmRanges() {
-        DoubleRange[] ranges = new DoubleRange[16];
-        ranges[0] = new DoubleRange("0 – 80", 0.0, true, 80.0, false);
-        for (int i = 0; i < 14; i++) {
-            double from = 80.0 + (i * 10.0);
-            double to = from + 10.0;
-            ranges[i + 1] = new DoubleRange(
-                    ((int) from) + " – " + ((int) to), from, true, to, false);
-        }
-        ranges[15] = new DoubleRange("220+", 220.0, true, Double.POSITIVE_INFINITY, false);
-        return ranges;
-    }
-
     private static Facets mix(DefaultSortedSetDocValuesReaderState state, FacetsCollector hits)
             throws IOException {
         FacetsCollector collector = hits != null ? hits : new FacetsCollector();
         Map<String, Facets> byDim = new LinkedHashMap<>();
         byDim.put("genre", new SortedSetDocValuesFacetCounts(state, collector));
-        byDim.put("bpm", new DoubleRangeFacetCounts("bpm", collector, bpmRanges()));
+        byDim.put("key", new SortedSetDocValuesFacetCounts(state, collector));
+        TrackFacets.NumericRange[] src = TrackFacets.bpmRanges();
+        DoubleRange[] ranges = new DoubleRange[src.length];
+        for (int i = 0; i < src.length; i++) {
+            TrackFacets.NumericRange range = src[i];
+            ranges[i] = new DoubleRange(range.label(), range.min(), true, range.max(), false);
+        }
+        byDim.put("bpm", new DoubleRangeFacetCounts("bpm", collector, ranges));
         byDim.put("rating", new LongValueFacetCounts("rating", collector));
         byDim.put("year", new LongValueFacetCounts("year", collector));
         return new MultiFacets(byDim);
@@ -452,30 +503,18 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return out;
     }
 
-    private static long count(FacetResult result, String label) {
-        if (result == null) {
-            return 0;
+    private static Map<String, Long> decades(FacetResult year) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        if (year == null) {
+            return out;
         }
-        for (LabelAndValue lv : result.labelValues) {
-            if (label.equals(lv.label)) {
-                return lv.value.longValue();
+        for (LabelAndValue lv : year.labelValues) {
+            String label = TrackFacets.decadeLabel(Integer.parseInt(lv.label));
+            if (label != null) {
+                out.merge(label, lv.value.longValue(), Long::sum);
             }
         }
-        return 0;
-    }
-
-    private static long yearRange(FacetResult result, int from, int to) {
-        if (result == null) {
-            return 0;
-        }
-        long total = 0;
-        for (LabelAndValue lv : result.labelValues) {
-            int y = Integer.parseInt(lv.label);
-            if (y >= from && y <= to) {
-                total += lv.value.longValue();
-            }
-        }
-        return total;
+        return out;
     }
 
     private static List<TrackSuggestion> suggestionsFor(Track track) {

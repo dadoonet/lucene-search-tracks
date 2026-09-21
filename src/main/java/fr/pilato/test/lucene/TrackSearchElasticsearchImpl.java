@@ -93,36 +93,51 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     }
 
     @Override
-    public TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws IOException {
-        Query post = filterQuery(postFilters);
-        Query scoped = post != null ? post : Query.of(qb -> qb.matchAll(m -> m));
-        SearchResponse<Track> response = client.search(s -> {
-                    s.index(INDEX)
-                            .size(0)
-                            .query(query(q, Map.of(), Map.of()))
-                            .aggregations("genre", a -> a.terms(t -> t.field("genre.raw").size(50)))
-                            .aggregations("drill", a -> a
-                                    .filter(scoped)
-                                    .aggregations("bpm", m -> m.range(r -> r
-                                            .field("bpm")
-                                            .ranges(rg -> rg.key("120 – 130").from(120d).to(130d))))
-                                    .aggregations("rating", m -> m.terms(t -> t.field("rating").size(10)))
-                                    .aggregations("year", m -> m.range(r -> r
-                                            .field("year")
-                                            .ranges(rg -> rg.key("2020–2029").from(2020d).to(2030d)))));
-                    if (post != null) {
-                        s.postFilter(post);
-                    }
-                    return s;
-                },
+    public TrackFacetsResult facets(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
+            throws IOException {
+        Map<String, List<String>> include = filters == null ? Map.of() : filters;
+        Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
+        Map<String, List<String>> withoutGenreAndKey = without(include, TrackFacets.GENRE, TrackFacets.KEY);
+        SearchResponse<Track> response = client.search(s -> s
+                        .index(INDEX)
+                        .size(0)
+                        .query(query(q, withoutGenreAndKey, exclude))
+                        .aggregations("genre", a -> a
+                                .filter(scoped(include, TrackFacets.KEY))
+                                .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
+                        .aggregations("key", a -> a
+                                .filter(scoped(include, TrackFacets.GENRE))
+                                .aggregations("key", m -> m.terms(t -> t.field("key").size(24))))
+                        .aggregations("drill", a -> a
+                                .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
+                                .aggregations("bpm", m -> m.range(r -> {
+                                    r.field("bpm");
+                                    for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
+                                        r.ranges(rg -> {
+                                            rg.key(range.label()).from(range.min());
+                                            if (!Double.isInfinite(range.max())) {
+                                                rg.to(range.max());
+                                            }
+                                            return rg;
+                                        });
+                                    }
+                                    return r;
+                                }))
+                                .aggregations("rating", m -> m.terms(t -> t.field("rating").size(10)))
+                                .aggregations("year", m -> m.histogram(h -> h
+                                        .field("year")
+                                        .interval(10d)
+                                        .minDocCount(1)))),
                 Track.class);
         Map<String, Aggregate> aggs = response.aggregations();
         Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
         return new TrackFacetsResult(
-                terms(aggs.get("genre")),
-                rangeCount(metrics.get("bpm"), "120 – 130"),
+                nestedTerms(aggs.get("genre"), "genre"),
+                rangeMap(metrics.get("bpm")),
                 terms(metrics.get("rating")),
-                rangeCount(metrics.get("year"), "2020–2029"));
+                decades(metrics.get("year")),
+                nestedTerms(aggs.get("key"), "key"));
     }
 
     @Override
@@ -204,17 +219,10 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
             return;
         }
         clauses.forEach((field, values) -> {
-            if (values == null || values.isEmpty()) {
+            Query terms = fieldFilter(field, values);
+            if (terms == null) {
                 return;
             }
-            Query terms = values.size() == 1
-                    ? term(field, values.getFirst())
-                    : Query.of(q -> q.bool(b -> {
-                        for (String value : values) {
-                            b.should(term(field, value));
-                        }
-                        return b.minimumShouldMatch("1");
-                    }));
             if (mustNot) {
                 bool.mustNot(terms);
             } else {
@@ -223,9 +231,104 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         });
     }
 
+    private static Query fieldFilter(String field, List<String> values) {
+        if (field == null || field.isBlank() || values == null || values.isEmpty()) {
+            return null;
+        }
+        List<Query> parts = new ArrayList<>();
+        for (String value : values) {
+            Query leaf = fieldQuery(field, value == null ? "" : value);
+            if (leaf != null) {
+                parts.add(leaf);
+            }
+        }
+        if (parts.isEmpty()) {
+            return null;
+        }
+        if (parts.size() == 1) {
+            return parts.getFirst();
+        }
+        return Query.of(q -> q.bool(b -> {
+            for (Query part : parts) {
+                b.should(part);
+            }
+            return b.minimumShouldMatch("1");
+        }));
+    }
+
+    private static Query fieldQuery(String field, String value) {
+        return switch (field) {
+            case "title", "artist", "genre" -> term(field + ".normalized", value);
+            case "key" -> term("key", value);
+            case "rating" -> ratingExact(value);
+            case "bpm" -> bpmRangeQuery(value);
+            case "year" -> yearDecade(value);
+            default -> null;
+        };
+    }
+
     private static Query term(String field, String value) {
-        String esField = "key".equals(field) ? "key" : field + ".normalized";
-        return Query.of(q -> q.term(t -> t.field(esField).value(value.toLowerCase(Locale.ROOT))));
+        return Query.of(q -> q.term(t -> t.field(field).value(value.toLowerCase(Locale.ROOT))));
+    }
+
+    private static Query ratingExact(String label) {
+        try {
+            int rating = Integer.parseInt(label.trim());
+            return Query.of(q -> q.term(t -> t.field("rating").value(rating)));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Query bpmRangeQuery(String label) {
+        for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
+            if (range.label().equals(label)) {
+                return Query.of(q -> q.range(r -> r.number(n -> {
+                    n.field("bpm").gte(range.min());
+                    if (!Double.isInfinite(range.max())) {
+                        n.lt(range.max());
+                    }
+                    return n;
+                })));
+            }
+        }
+        return null;
+    }
+
+    private static Query yearDecade(String label) {
+        int[] bounds = TrackFacets.decadeBounds(label);
+        if (bounds == null) {
+            return Query.of(q -> q.matchNone(m -> m));
+        }
+        return Query.of(q -> q.range(r -> r.number(n -> n
+                .field("year")
+                .gte((double) bounds[0])
+                .lte((double) bounds[1]))));
+    }
+
+    private static Map<String, List<String>> without(Map<String, List<String>> filters, String... dims) {
+        if (filters == null || filters.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> out = new LinkedHashMap<>(filters);
+        for (String dim : dims) {
+            out.remove(dim);
+        }
+        return out;
+    }
+
+    private static Query scoped(Map<String, List<String>> filters, String... dims) {
+        Map<String, List<String>> subset = new LinkedHashMap<>();
+        if (filters != null) {
+            for (String dim : dims) {
+                List<String> values = filters.get(dim);
+                if (values != null && !values.isEmpty()) {
+                    subset.put(dim, values);
+                }
+            }
+        }
+        Query query = filterQuery(subset);
+        return query != null ? query : Query.of(qb -> qb.matchAll(m -> m));
     }
 
     private static Property textWithRaw() {
@@ -264,6 +367,10 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         return false;
     }
 
+    private static Map<String, Long> nestedTerms(Aggregate filter, String name) {
+        return terms(metrics(filter).get(name));
+    }
+
     private static Map<String, Long> terms(Aggregate agg) {
         Map<String, Long> out = new LinkedHashMap<>();
         if (agg == null) {
@@ -281,16 +388,31 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         return out;
     }
 
-    private static long rangeCount(Aggregate agg, String key) {
+    private static Map<String, Long> rangeMap(Aggregate agg) {
+        Map<String, Long> out = new LinkedHashMap<>();
         if (agg == null || !agg.isRange()) {
-            return 0;
+            return out;
         }
         for (var bucket : agg.range().buckets().array()) {
-            if (key.equals(bucket.key())) {
-                return bucket.docCount();
+            if (bucket.docCount() > 0) {
+                out.put(bucket.key(), bucket.docCount());
             }
         }
-        return 0;
+        return out;
+    }
+
+    private static Map<String, Long> decades(Aggregate agg) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        if (agg == null || !agg.isHistogram()) {
+            return out;
+        }
+        for (var bucket : agg.histogram().buckets().array()) {
+            String label = TrackFacets.decadeLabel((int) bucket.key());
+            if (label != null && bucket.docCount() > 0) {
+                out.merge(label, bucket.docCount(), Long::sum);
+            }
+        }
+        return out;
     }
 
     private static void addSuggestion(

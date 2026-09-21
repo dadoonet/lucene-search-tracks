@@ -13,7 +13,13 @@ public interface TrackSearch extends AutoCloseable {
             Map<String, List<String>> filters,
             Map<String, List<String>> mustNots) throws Exception;
 
-    TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws Exception;
+    TrackFacetsResult facets(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
+            throws Exception;
+
+    default TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws Exception {
+        return facets(q, postFilters == null ? Map.of() : postFilters, Map.of());
+    }
 
     List<TrackSuggestion> suggest(String prefix) throws Exception;
 

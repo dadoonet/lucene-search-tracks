@@ -4,7 +4,7 @@ import java.util.Map;
 
 public record TrackFacetsResult(
         Map<String, Long> genres,
-        long bpm120to130,
+        Map<String, Long> bpm,
         Map<String, Long> ratings,
-        long year2020s
-) {}
+        Map<String, Long> years,
+        Map<String, Long> keys) {}

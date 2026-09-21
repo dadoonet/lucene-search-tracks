@@ -227,9 +227,10 @@ public final class PlaygroundLuceneHelper implements AutoCloseable {
         FacetResult year = facets.getAllChildren(TrackDocumentMapper.YEAR);
         return new TrackFacetsResult(
                 toMap(genres),
-                count(bpm, "120 – 130"),
+                toMap(bpm),
                 toMap(rating),
-                yearRange(year, 2020, 2029));
+                decades(year),
+                Map.of());
     }
 
     private static Map<String, Long> toMap(FacetResult result) {
@@ -243,30 +244,18 @@ public final class PlaygroundLuceneHelper implements AutoCloseable {
         return out;
     }
 
-    private static long count(FacetResult result, String label) {
-        if (result == null) {
-            return 0;
+    private static Map<String, Long> decades(FacetResult year) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        if (year == null) {
+            return out;
         }
-        for (LabelAndValue lv : result.labelValues) {
-            if (label.equals(lv.label)) {
-                return lv.value.longValue();
+        for (LabelAndValue lv : year.labelValues) {
+            String label = TrackFacets.decadeLabel(Integer.parseInt(lv.label));
+            if (label != null) {
+                out.merge(label, lv.value.longValue(), Long::sum);
             }
         }
-        return 0;
-    }
-
-    private static long yearRange(FacetResult result, int from, int to) {
-        if (result == null) {
-            return 0;
-        }
-        long total = 0;
-        for (LabelAndValue lv : result.labelValues) {
-            int y = Integer.parseInt(lv.label);
-            if (y >= from && y <= to) {
-                total += lv.value.longValue();
-            }
-        }
-        return total;
+        return out;
     }
 
     private static Facets mix(DefaultSortedSetDocValuesReaderState state, FacetsCollector hits)
