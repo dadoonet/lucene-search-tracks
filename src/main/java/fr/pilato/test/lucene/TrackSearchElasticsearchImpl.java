@@ -150,6 +150,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         private int totalHits;
         private List<TrackHit> hits;
         private TrackFacetsResult facets;
+        private String printedResponse;
 
         private ElasticsearchSession(
                 String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
@@ -161,39 +162,22 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
         @Override
         public String printQuery() {
-            return prettyJson(JsonpUtils.toJsonString(facetRequest(q, filters, mustNots), JSONP));
+            return prettyJson(JsonpUtils.toJsonString(searchRequest(q, filters, mustNots, size), JSONP));
         }
 
         @Override
         public void execute() throws Exception {
-            Query dsl = query(q, filters, mustNots);
-            SearchResponse<Track> response = client.search(s -> s
-                            .index(INDEX)
-                            .size(size)
-                            .trackTotalHits(t -> t.enabled(true))
-                            .query(dsl)
-                            .highlight(h -> h
-                                    .preTags("<b>")
-                                    .postTags("</b>")
-                                    .numberOfFragments(0)
-                                    .fields(
-                                            NamedValue.of("title", HighlightField.of(f -> f)),
-                                            NamedValue.of("artist", HighlightField.of(f -> f)),
-                                            NamedValue.of("genre", HighlightField.of(f -> f)),
-                                            NamedValue.of("album", HighlightField.of(f -> f)),
-                                            NamedValue.of("label", HighlightField.of(f -> f)),
-                                            NamedValue.of("comment", HighlightField.of(f -> f)))),
-                    Track.class);
+            SearchResponse<Track> response = client.search(
+                    searchRequest(q, filters, mustNots, size), Track.class);
+            String nextPrintedResponse = prettyJson(JsonpUtils.toJsonString(response, JSONP));
+            int nextTotalHits = Math.toIntExact(response.hits().total().value());
             List<TrackHit> ordered = new ArrayList<>();
             for (Hit<Track> hit : response.hits().hits()) {
                 if (hit.source() != null) {
                     ordered.add(new TrackHit(hit.source(), score(hit), highlightMap(hit.highlight())));
                 }
             }
-            int nextTotalHits = (int) response.hits().total().value();
-
-            SearchResponse<Track> facetResponse = client.search(facetRequest(q, filters, mustNots), Track.class);
-            Map<String, Aggregate> aggs = facetResponse.aggregations();
+            Map<String, Aggregate> aggs = response.aggregations();
             Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
             TrackFacetsResult nextFacets = new TrackFacetsResult(
                     nestedTerms(aggs.get("genre"), "genre"),
@@ -201,8 +185,9 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                     terms(metrics.get("rating")),
                     decades(metrics.get("year")),
                     nestedTerms(aggs.get("key"), "key"));
-            this.hits = List.copyOf(ordered);
+            this.printedResponse = nextPrintedResponse;
             this.totalHits = nextTotalHits;
+            this.hits = List.copyOf(ordered);
             this.facets = nextFacets;
             this.executed = true;
         }
@@ -228,7 +213,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         @Override
         public String printResponse() {
             requireExecuted();
-            return "";
+            return printedResponse;
         }
 
         private void requireExecuted() {
@@ -238,41 +223,70 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         }
     }
 
-    private static SearchRequest facetRequest(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
+    private static SearchRequest searchRequest(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
         Map<String, List<String>> include = filters == null ? Map.of() : filters;
         Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
         Map<String, List<String>> withoutGenreAndKey = without(include, TrackFacets.GENRE, TrackFacets.KEY);
-        return SearchRequest.of(s -> s
-                .index(INDEX)
-                .size(0)
-                .query(query(q, withoutGenreAndKey, exclude))
-                .aggregations("genre", a -> a
-                        .filter(scoped(include, TrackFacets.KEY))
-                        .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
-                .aggregations("key", a -> a
-                        .filter(scoped(include, TrackFacets.GENRE))
-                        .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(50))))
-                .aggregations("drill", a -> a
-                        .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
-                        .aggregations("bpm", m -> m.range(r -> {
-                            r.field("bpm");
-                            for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
-                                r.ranges(rg -> {
-                                    rg.key(range.label()).from(range.min());
-                                    if (!Double.isInfinite(range.max())) {
-                                        rg.to(range.max());
-                                    }
-                                    return rg;
-                                });
-                            }
-                            return r;
-                        }))
-                        .aggregations("rating", m -> m.terms(t -> t.field("rating").size(10)))
-                        .aggregations("year", m -> m.histogram(h -> h
-                                .field("year")
-                                .interval(10d)
-                                .minDocCount(1)))));
+        Map<String, List<String>> genreAndKey = new LinkedHashMap<>();
+        putIfPresent(genreAndKey, include, TrackFacets.GENRE);
+        putIfPresent(genreAndKey, include, TrackFacets.KEY);
+        Query postFilter = filterQuery(genreAndKey);
+        return SearchRequest.of(s -> {
+            s.index(INDEX)
+                    .size(size)
+                    .trackTotalHits(t -> t.enabled(true))
+                    .query(query(q, withoutGenreAndKey, exclude))
+                    .highlight(h -> h
+                            .preTags("<b>")
+                            .postTags("</b>")
+                            .numberOfFragments(0)
+                            .fields(
+                                    NamedValue.of("title", HighlightField.of(f -> f)),
+                                    NamedValue.of("artist", HighlightField.of(f -> f)),
+                                    NamedValue.of("genre", HighlightField.of(f -> f)),
+                                    NamedValue.of("album", HighlightField.of(f -> f)),
+                                    NamedValue.of("label", HighlightField.of(f -> f)),
+                                    NamedValue.of("comment", HighlightField.of(f -> f))))
+                    .aggregations("genre", a -> a
+                            .filter(scoped(include, TrackFacets.KEY))
+                            .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
+                    .aggregations("key", a -> a
+                            .filter(scoped(include, TrackFacets.GENRE))
+                            .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(50))))
+                    .aggregations("drill", a -> a
+                            .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
+                            .aggregations("bpm", m -> m.range(r -> {
+                                r.field("bpm");
+                                for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
+                                    r.ranges(rg -> {
+                                        rg.key(range.label()).from(range.min());
+                                        if (!Double.isInfinite(range.max())) {
+                                            rg.to(range.max());
+                                        }
+                                        return rg;
+                                    });
+                                }
+                                return r;
+                            }))
+                            .aggregations("rating", m -> m.terms(t -> t.field("rating").size(10)))
+                            .aggregations("year", m -> m.histogram(h -> h
+                                    .field("year")
+                                    .interval(10d)
+                                    .minDocCount(1))));
+            if (postFilter != null) {
+                s.postFilter(postFilter);
+            }
+            return s;
+        });
+    }
+
+    private static void putIfPresent(
+            Map<String, List<String>> target, Map<String, List<String>> source, String dim) {
+        List<String> values = source.get(dim);
+        if (values != null && !values.isEmpty()) {
+            target.put(dim, values);
+        }
     }
 
     private static String prettyJson(String json) {

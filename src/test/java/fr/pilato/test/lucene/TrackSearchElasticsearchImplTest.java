@@ -64,13 +64,44 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
     }
 
     @Test
+    void printQuery_size25_includesAggregations() throws Exception {
+        TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
+        assertThat(session.printQuery())
+                .contains("\"size\"")
+                .contains("25")
+                .contains("aggregations")
+                .contains("120 – 130")
+                .contains("multi_match")
+                .contains("highlight");
+    }
+
+    @Test
+    void printQuery_genreFilter_usesPostFilter() throws Exception {
+        TrackSearchSession session = index().prepareRequest(
+                "Bob", Map.of("genre", List.of("Club")), Map.of(), 25);
+        assertThat(session.printQuery()).contains("post_filter");
+    }
+
+    @Test
+    void printResponse_afterExecute_hasHitsAndAggregations() throws Exception {
+        TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
+        session.execute();
+        assertThat(session.printResponse())
+                .contains("\"hits\"")
+                .contains("aggregations")
+                .contains("120 – 130");
+        assertThat(session.getHits()).hasSize(25);
+        assertThat(session.totalHits()).isEqualTo(62);
+    }
+
+    @Test
     void session_failedRerunAfterHits_keepsPreviousCompleteResults() throws Exception {
         AtomicInteger searches = new AtomicInteger();
         ElasticsearchClient failing = new ElasticsearchClient(client._transport()) {
             @Override
             public <TDocument> SearchResponse<TDocument> search(
                     SearchRequest request, Class<TDocument> tDocumentClass) throws IOException {
-                if (searches.incrementAndGet() == 4) {
+                if (searches.incrementAndGet() == 2) {
                     throw new IOException("facet request failed");
                 }
                 return super.search(request, tDocumentClass);
