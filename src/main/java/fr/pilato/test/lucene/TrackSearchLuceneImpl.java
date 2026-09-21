@@ -213,8 +213,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         synchronized (writeLock) {
             int lookupCount = SUGGEST_LIMIT;
             if (allowed != null) {
-                lookupCount = (int) Math.min(Integer.MAX_VALUE,
-                        Math.max(SUGGEST_LIMIT, suggester.getCount()));
+                lookupCount = Math.clamp(suggester.getCount(), SUGGEST_LIMIT, Integer.MAX_VALUE);
             }
             List<Lookup.LookupResult> matches =
                     suggester.lookup(prefix, Set.of(), lookupCount, true, true);
