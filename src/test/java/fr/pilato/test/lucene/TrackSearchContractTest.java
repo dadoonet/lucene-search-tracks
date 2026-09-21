@@ -2,6 +2,7 @@ package fr.pilato.test.lucene;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -23,10 +24,30 @@ public abstract class TrackSearchContractTest {
     void session_getHits_beforeExecuteThrows() throws Exception {
         TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
         assertThat(session.printQuery()).containsIgnoringCase("bob");
-        assertThatThrownBy(session::getHits).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(session::getFacets).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(session::totalHits).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(session::printResponse).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(session::getHits)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("execute() must be called first");
+        assertThatThrownBy(session::getFacets)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("execute() must be called first");
+        assertThatThrownBy(session::totalHits)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("execute() must be called first");
+        assertThatThrownBy(session::printResponse)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("execute() must be called first");
+    }
+
+    @Test
+    void session_filterMapsAreCopied() throws Exception {
+        Map<String, List<String>> filters = new HashMap<>();
+        filters.put("genre", List.of("Club"));
+        Map<String, List<String>> mustNots = new HashMap<>();
+        TrackSearchSession session = index().prepareRequest("Bob", filters, mustNots, 25);
+        filters.clear();
+        mustNots.put("key", List.of("4A"));
+        session.execute();
+        assertThat(session.totalHits()).isEqualTo(26);
     }
 
     @Test
@@ -137,6 +158,12 @@ public abstract class TrackSearchContractTest {
                     assertThat(hit.highlights().get("label")).containsIgnoringCase("wagram");
                     assertThat(hit.highlights().get("label")).contains("<b>");
                 });
+    }
+
+    @Test
+    void facets_remix_returnsNonEmptyGenres() throws Exception {
+        TrackFacetsResult facets = index().facets("remix", Map.of(), Map.of());
+        assertThat(facets.genres()).isNotEmpty();
     }
 
     @Test

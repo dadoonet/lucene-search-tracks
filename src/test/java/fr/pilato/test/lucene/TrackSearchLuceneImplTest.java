@@ -1,5 +1,6 @@
 package fr.pilato.test.lucene;
 
+import org.apache.lucene.store.AlreadyClosedException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -49,7 +50,7 @@ class TrackSearchLuceneImplTest extends TrackSearchContractTest {
         int previousTotal = session.totalHits();
         TrackFacetsResult previousFacets = session.getFacets();
         engine.close();
-        assertThatThrownBy(session::execute).isInstanceOf(Exception.class);
+        assertThatThrownBy(session::execute).isInstanceOf(AlreadyClosedException.class);
         assertThat(session.getHits()).isSameAs(previousHits);
         assertThat(session.totalHits()).isEqualTo(previousTotal);
         assertThat(session.getFacets()).isSameAs(previousFacets);

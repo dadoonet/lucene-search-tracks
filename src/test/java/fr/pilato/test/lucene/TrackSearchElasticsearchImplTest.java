@@ -3,6 +3,8 @@ package fr.pilato.test.lucene;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -66,13 +68,21 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
     @Test
     void printQuery_size25_includesAggregations() throws Exception {
         TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
-        assertThat(session.printQuery())
+        String json = session.printQuery();
+        JsonNode tree = new ObjectMapper().readTree(json);
+        assertThat(tree.path("size").intValue()).isEqualTo(25);
+        assertThat(json)
                 .contains("\"size\"")
-                .contains("25")
                 .contains("aggregations")
                 .contains("120 – 130")
                 .contains("multi_match")
                 .contains("highlight");
+    }
+
+    @Test
+    void printQuery_wrapperUsesSize1() throws Exception {
+        JsonNode tree = new ObjectMapper().readTree(index().printQuery("Bob", Map.of(), Map.of()));
+        assertThat(tree.path("size").intValue()).isEqualTo(1);
     }
 
     @Test
@@ -102,7 +112,7 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
             public <TDocument> SearchResponse<TDocument> search(
                     SearchRequest request, Class<TDocument> tDocumentClass) throws IOException {
                 if (searches.incrementAndGet() == 2) {
-                    throw new IOException("facet request failed");
+                    throw new IOException("search request failed");
                 }
                 return super.search(request, tDocumentClass);
             }
@@ -115,7 +125,7 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
         TrackFacetsResult previousFacets = session.getFacets();
         assertThatThrownBy(session::execute)
                 .isInstanceOf(IOException.class)
-                .hasMessage("facet request failed");
+                .hasMessage("search request failed");
         assertThat(session.getHits()).isSameAs(previousHits);
         assertThat(session.totalHits()).isEqualTo(previousTotal);
         assertThat(session.getFacets()).isSameAs(previousFacets);

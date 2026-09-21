@@ -521,8 +521,8 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         private LuceneSession(
                 String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
             this.q = q;
-            this.filters = filters;
-            this.mustNots = mustNots;
+            this.filters = filters == null ? Map.of() : Map.copyOf(filters);
+            this.mustNots = mustNots == null ? Map.of() : Map.copyOf(mustNots);
             this.size = size;
         }
 
@@ -626,7 +626,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
 
         private void requireExecuted() {
             if (!executed) {
-                throw new IllegalStateException();
+                throw new IllegalStateException("execute() must be called first");
             }
         }
     }

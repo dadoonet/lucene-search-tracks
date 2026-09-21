@@ -23,7 +23,7 @@ public interface TrackSearch extends AutoCloseable {
     default TrackFacetsResult facets(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws Exception {
-        TrackSearchSession session = prepareRequest(q, filters, mustNots, 10_000);
+        TrackSearchSession session = prepareRequest(q, filters, mustNots, 1);
         session.execute();
         return session.getFacets();
     }
@@ -39,7 +39,7 @@ public interface TrackSearch extends AutoCloseable {
     default String printQuery(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws Exception {
-        return prepareRequest(q, filters, mustNots, 10_000).printQuery();
+        return prepareRequest(q, filters, mustNots, 1).printQuery();
     }
 
     List<TrackSuggestion> suggest(String prefix) throws Exception;
