@@ -38,6 +38,10 @@ final class PlaygroundElasticsearch implements AutoCloseable {
         return ready;
     }
 
+    synchronized ElasticsearchSettings settings() {
+        return settings;
+    }
+
     synchronized TrackSearch trackSearch() {
         return ready ? index : null;
     }

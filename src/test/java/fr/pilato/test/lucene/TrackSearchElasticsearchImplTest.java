@@ -3,9 +3,14 @@ package fr.pilato.test.lucene;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
@@ -41,5 +46,14 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
     @Override
     protected TrackSearch index() {
         return index;
+    }
+
+    @Test
+    void printQuery_includesAggregationsAndBpmRanges() throws Exception {
+        String json = index().printQuery("Bob", Map.of(), Map.of());
+        assertThat(json)
+                .contains("aggregations")
+                .contains("120 – 130")
+                .contains("multi_match");
     }
 }

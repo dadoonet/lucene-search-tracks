@@ -1986,8 +1986,7 @@ function setDemoReadout(search, facets) {
   readout(`
     <h3>${search.total} hits</h3>
     <p class="muted">${escapeHtml(engine)}</p>
-    <h3>tokens</h3>
-    <p>${(search.tokens || []).map((token) => `<span class="idx-chip">${escapeHtml(token)}</span>`).join(" ") || `<span class="muted">match-all</span>`}</p>`);
+    <pre class="demo-query">${escapeHtml(search.query || "")}</pre>`);
 }
 
 function show(name) {

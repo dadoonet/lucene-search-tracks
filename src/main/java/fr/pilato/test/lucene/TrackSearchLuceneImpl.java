@@ -283,6 +283,12 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     }
 
     @Override
+    public String printQuery(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
+        return query(q, filters, mustNots).toString();
+    }
+
+    @Override
     public void close() throws IOException {
         synchronized (writeLock) {
             suggester.close();

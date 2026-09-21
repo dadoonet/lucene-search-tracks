@@ -8,12 +8,19 @@ import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.json.JsonpUtils;
+import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.util.NamedValue;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -30,6 +37,9 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     private static final int SUGGEST_LIMIT = 10;
     private static final int HIGHLIGHT_LIMIT = 25;
     private static final Pattern HIGHLIGHT = Pattern.compile("<em>(.*?)</em>", Pattern.CASE_INSENSITIVE);
+    private static final JacksonJsonpMapper JSONP = new JacksonJsonpMapper();
+    private static final ObjectMapper PRETTY = new ObjectMapper()
+            .enable(SerializationFeature.INDENT_OUTPUT);
 
     private final ElasticsearchClient client;
 
@@ -127,40 +137,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     public TrackFacetsResult facets(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws IOException {
-        Map<String, List<String>> include = filters == null ? Map.of() : filters;
-        Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
-        Map<String, List<String>> withoutGenreAndKey = without(include, TrackFacets.GENRE, TrackFacets.KEY);
-        SearchResponse<Track> response = client.search(s -> s
-                        .index(INDEX)
-                        .size(0)
-                        .query(query(q, withoutGenreAndKey, exclude))
-                        .aggregations("genre", a -> a
-                                .filter(scoped(include, TrackFacets.KEY))
-                                .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
-                        .aggregations("key", a -> a
-                                .filter(scoped(include, TrackFacets.GENRE))
-                                .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(50))))
-                        .aggregations("drill", a -> a
-                                .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
-                                .aggregations("bpm", m -> m.range(r -> {
-                                    r.field("bpm");
-                                    for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
-                                        r.ranges(rg -> {
-                                            rg.key(range.label()).from(range.min());
-                                            if (!Double.isInfinite(range.max())) {
-                                                rg.to(range.max());
-                                            }
-                                            return rg;
-                                        });
-                                    }
-                                    return r;
-                                }))
-                                .aggregations("rating", m -> m.terms(t -> t.field("rating").size(10)))
-                                .aggregations("year", m -> m.histogram(h -> h
-                                        .field("year")
-                                        .interval(10d)
-                                        .minDocCount(1)))),
-                Track.class);
+        SearchResponse<Track> response = client.search(facetRequest(q, filters, mustNots), Track.class);
         Map<String, Aggregate> aggs = response.aggregations();
         Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
         return new TrackFacetsResult(
@@ -169,6 +146,12 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                 terms(metrics.get("rating")),
                 decades(metrics.get("year")),
                 nestedTerms(aggs.get("key"), "key"));
+    }
+
+    @Override
+    public String printQuery(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
+        return prettyJson(JsonpUtils.toJsonString(facetRequest(q, filters, mustNots), JSONP));
     }
 
     @Override
@@ -216,6 +199,52 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     @Override
     public void close() {}
+
+    private static SearchRequest facetRequest(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
+        Map<String, List<String>> include = filters == null ? Map.of() : filters;
+        Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
+        Map<String, List<String>> withoutGenreAndKey = without(include, TrackFacets.GENRE, TrackFacets.KEY);
+        return SearchRequest.of(s -> s
+                .index(INDEX)
+                .size(0)
+                .query(query(q, withoutGenreAndKey, exclude))
+                .aggregations("genre", a -> a
+                        .filter(scoped(include, TrackFacets.KEY))
+                        .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
+                .aggregations("key", a -> a
+                        .filter(scoped(include, TrackFacets.GENRE))
+                        .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(50))))
+                .aggregations("drill", a -> a
+                        .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
+                        .aggregations("bpm", m -> m.range(r -> {
+                            r.field("bpm");
+                            for (TrackFacets.NumericRange range : TrackFacets.bpmRanges()) {
+                                r.ranges(rg -> {
+                                    rg.key(range.label()).from(range.min());
+                                    if (!Double.isInfinite(range.max())) {
+                                        rg.to(range.max());
+                                    }
+                                    return rg;
+                                });
+                            }
+                            return r;
+                        }))
+                        .aggregations("rating", m -> m.terms(t -> t.field("rating").size(10)))
+                        .aggregations("year", m -> m.histogram(h -> h
+                                .field("year")
+                                .interval(10d)
+                                .minDocCount(1)))));
+    }
+
+    private static String prettyJson(String json) {
+        try {
+            JsonNode tree = PRETTY.readTree(json);
+            return PRETTY.writeValueAsString(tree);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
 
     private static Query query(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {

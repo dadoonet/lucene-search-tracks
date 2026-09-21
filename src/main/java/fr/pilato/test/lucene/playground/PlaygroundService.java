@@ -289,8 +289,18 @@ public final class PlaygroundService implements AutoCloseable {
                     hit.score(), null, null, hit.highlights()));
         }
         List<String> tokens = TrackAnalyzers.tokenize(q);
-        String query = String.join(" ", tokens);
-        SearchResponse response = new SearchResponse(q, tokens, query, total, List.copyOf(hits), 0);
+        String printed;
+        try {
+            printed = engine.printQuery(q, filters, mustNots);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
+        if (engine != index) {
+            printed = ElasticsearchCurl.wrap(elasticsearch.settings(), printed);
+        }
+        SearchResponse response = new SearchResponse(q, tokens, printed, total, List.copyOf(hits), 0);
         if (engine == index) {
             response = withLuceneOverlay(response, request, q, filters, mustNots);
         }
@@ -365,7 +375,7 @@ public final class PlaygroundService implements AutoCloseable {
             return new SearchResponse(
                     response.q(),
                     tokens,
-                    lucene.toString(),
+                    response.query(),
                     response.total(),
                     List.copyOf(hits),
                     response.tookMs());
@@ -488,12 +498,13 @@ public final class PlaygroundService implements AutoCloseable {
                 .toList();
         TrackFacetsResult raw = engine.facets(queryText, include, exclude);
         boolean sideways = !genres.isEmpty();
-        String luceneQuery = engine == index
-                ? TrackLuceneQueryBuilder.buildStructured(queryText, include, exclude).toString()
-                : "";
+        String printed = engine.printQuery(queryText, include, exclude);
+        if (engine != index) {
+            printed = ElasticsearchCurl.wrap(elasticsearch.settings(), printed);
+        }
         return new FacetsResponse(
                 queryText,
-                luceneQuery,
+                printed,
                 sideways,
                 String.join(", ", genres),
                 List.of(

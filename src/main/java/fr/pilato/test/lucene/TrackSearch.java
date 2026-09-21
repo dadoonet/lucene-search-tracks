@@ -21,6 +21,14 @@ public interface TrackSearch extends AutoCloseable {
         return facets(q, postFilters == null ? Map.of() : postFilters, Map.of());
     }
 
+    /**
+     * Engine-native rendering of the search that {@link #search} / {@link #facets} would run.
+     * Lucene: {@code Query#toString()}. Elasticsearch: pretty JSON body (query + aggregations).
+     */
+    String printQuery(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
+            throws Exception;
+
     List<TrackSuggestion> suggest(String prefix) throws Exception;
 
     List<TrackSuggestion> suggest(String prefix, Collection<Track> scope) throws Exception;

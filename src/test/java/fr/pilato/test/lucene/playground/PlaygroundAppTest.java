@@ -133,8 +133,8 @@ class PlaygroundAppTest {
                     .contains("setDemoBackend")
                     .contains("setDemoReadout")
                     .contains("search.total")
-                    .contains("search.tokens")
-                    .doesNotContain("? \"curl\"")
+                    .contains("search.query")
+                    .contains("demo-query")
                     .contains("/api/elasticsearch")
                     .contains("getElementById(\"es-url\")")
                     .contains("getElementById(\"es-api-key\")");

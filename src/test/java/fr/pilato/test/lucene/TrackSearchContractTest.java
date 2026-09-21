@@ -19,6 +19,12 @@ public abstract class TrackSearchContractTest {
     }
 
     @Test
+    void printQuery_bobMentionsTheText() throws Exception {
+        String printed = index().printQuery("Bob", Map.of(), Map.of());
+        assertThat(printed).containsIgnoringCase("bob");
+    }
+
+    @Test
     void bob_returns62Hits() throws Exception {
         assertThat(search("Bob", Map.of(), Map.of())).hasSize(62);
     }

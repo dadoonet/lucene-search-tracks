@@ -203,7 +203,7 @@ class PlaygroundServiceTest {
         var club = service.search(new SearchRequest(
                 "Bob", Map.of("genre", List.of("Club")), Map.of(), null));
         assertThat(club.total()).isEqualTo(26);
-        assertThat(club.query()).contains("#");
+        assertThat(club.query()).contains("club");
 
         var minusKeys = service.search(new SearchRequest(
                 "Bob",
