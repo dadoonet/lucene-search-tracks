@@ -58,6 +58,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -68,10 +69,20 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Self-contained Lucene {@link TrackSearch}: same public surface as
- * {@link TrackSearchElasticsearchImpl}, with
- * analyzer / mapping / query / facets / suggest inlined. Playground uses this
- * for the {@link TrackSearch} contract.
+ * In-memory Lucene {@link TrackSearch}: analyzer, mapping, query, facets and
+ * suggest live here so this class can sit next to
+ * {@link TrackSearchElasticsearchImpl} with the same contract.
+ *
+ * <p>{@code LuceneSession.execute()} is one collector pass. Genre and key
+ * <em>includes</em> use {@link DrillSideways}: those maps stay full while hits
+ * and the other facet maps narrow. BPM / rating / year includes and all
+ * excludes go into the base query (not sideways). {@code size = 0} still
+ * collects facets; Lucene's top-N API needs {@code n >= 1}, so the collector
+ * asks for 1 hit and the session keeps an empty page.
+ *
+ * <p>{@link TrackSearchSession#printQuery()} is the hits
+ * {@link Query#toString()} (all filters, including genre/key), not a
+ * JSON body. {@link TrackSearchSession#printResponse()} is always empty.
  */
 public final class TrackSearchLuceneImpl implements TrackSearch {
 
@@ -94,6 +105,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     private final Object writeLock = new Object();
     private final Map<String, Track> tracks = new LinkedHashMap<>();
 
+    /** RAM index and infix suggester; call {@link #rebuild} before searching. */
     public TrackSearchLuceneImpl() throws IOException {
         directory = new ByteBuffersDirectory();
         writer = new IndexWriter(directory, new IndexWriterConfig(analyzer()));
@@ -101,6 +113,11 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         suggester = new AnalyzingInfixSuggester(suggestionDirectory, analyzer());
     }
 
+    /**
+     * Wipe and re-index {@code tracks} in RAM, then rebuild the infix
+     * suggester. {@link FacetsConfig#build} adds the {@code $facets} fields
+     * DrillSideways needs.
+     */
     @Override
     public void rebuild(List<Track> tracks) throws IOException {
         synchronized (writeLock) {
@@ -123,15 +140,22 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         }
     }
 
+    /**
+     * Snapshot {@code q} / filters / {@code size} into a {@link LuceneSession}.
+     * Filter maps are copied so later mutation cannot desync print vs execute.
+     */
     @Override
     public TrackSearchSession prepareRequest(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
-        if (size < 1) {
-            throw new IllegalArgumentException("size must be >= 1");
+        if (size < 0) {
+            throw new IllegalArgumentException("size must be >= 0");
         }
         return new LuceneSession(q, filters, mustNots, size);
     }
 
+    /**
+     * Whole-field highlighter ({@code <b>}) on the returned page only.
+     */
     private static List<Map<String, String>> highlight(
             IndexSearcher searcher, Query query, TopDocs topDocs) throws IOException {
         if (topDocs == null || topDocs.scoreDocs.length == 0) {
@@ -159,11 +183,16 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         }
     }
 
+    /** Infix lookup on title / artist / genre; payload on each entry is the field name. */
     @Override
     public List<TrackSuggestion> suggest(String prefix) throws IOException {
         return suggest(prefix, null);
     }
 
+    /**
+     * Same as {@link #suggest(String)}, then drop entries that do not appear
+     * on any track in {@code scope}. Empty prefix or empty scope → no hits.
+     */
     @Override
     public List<TrackSuggestion> suggest(String prefix, Collection<Track> scope) throws IOException {
         if (prefix == null || prefix.isBlank() || (scope != null && scope.isEmpty())) {
@@ -216,6 +245,11 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         }
     }
 
+    /**
+     * Hits query: analyzed free text (AND of tokens, last token also prefix)
+     * plus FILTER includes and MUST_NOT excludes. Field boosts:
+     * title 4, artist 3, genre 2, album 1.5, label 1, comment 0.5.
+     */
     private Query query(String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
         Query text = analyzedFreeText(q);
         boolean hasText = !(text instanceof MatchAllDocsQuery);
@@ -237,6 +271,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return result.build();
     }
 
+    /** Add one FILTER or MUST_NOT clause per non-empty dimension; return how many were added. */
     private static int addClauses(
             BooleanQuery.Builder result, Map<String, List<String>> clauses, BooleanClause.Occur occur) {
         if (clauses == null || clauses.isEmpty()) {
@@ -254,6 +289,10 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return count;
     }
 
+    /**
+     * Blank → match-all. Otherwise AND of tokens; the last token is also a
+     * prefix (type-as-you-search), at {@code PREFIX_BOOST} of the field boost.
+     */
     private static Query analyzedFreeText(String text) {
         if (text == null || text.isBlank()) {
             return MatchAllDocsQuery.INSTANCE;
@@ -298,6 +337,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         }
     }
 
+    /** OR of chip values on one dimension; {@code null} if the dim is unknown or empty. */
     private static Query fieldFilter(String field, List<String> values) {
         if (field == null || field.isBlank() || values == null || values.isEmpty()) {
             return null;
@@ -323,6 +363,12 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return sameField.build();
     }
 
+    /**
+     * One chip. Text dims hit {@code *.raw.normalized}; Camelot uses
+     * {@code key.code}. BPM is half-open {@code [min, max)} via
+     * {@link Math#nextDown(double)} on a Lucene inclusive max. Year is a decade
+     * range; unknown decade → {@link MatchNoDocsQuery}.
+     */
     private static Query fieldQuery(String field, String value) {
         return switch (field) {
             case "title" -> new TermQuery(new Term("title.raw.normalized", normalize(value)));
@@ -364,6 +410,10 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return IntField.newRangeQuery("year", bounds[0], bounds[1]);
     }
 
+    /**
+     * Stored text + keyword twins for filters, {@link SortedSetDocValuesFacetField}
+     * for genre/key drill-down, and numeric fields for BPM / rating / year.
+     */
     private static Document toDocument(Track t) {
         Document doc = new Document();
         doc.add(new StringField("id", t.id(), Field.Store.YES));
@@ -412,6 +462,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return nfc(s).toLowerCase(Locale.ROOT);
     }
 
+    /** Same pipeline as Elasticsearch {@code track}: standard tokenizer, lowercase, ASCII fold. */
     private static Analyzer analyzer() {
         return new Analyzer() {
             @Override
@@ -443,6 +494,10 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return List.copyOf(tokens);
     }
 
+    /**
+     * All facet dimensions from one collector: sorted-set genre/key, BPM
+     * half-open ranges, rating and year as longs (years later rolled into decades).
+     */
     private static Facets mix(DefaultSortedSetDocValuesReaderState state, FacetsCollector hits)
             throws IOException {
         FacetsCollector collector = hits != null ? hits : new FacetsCollector();
@@ -508,6 +563,13 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         return field + "\0" + text;
     }
 
+    /**
+     * One Lucene search: hits page + facet maps. {@link #printQuery()} is
+     * {@code query(q, filters, mustNots).toString()} — the flattened hits
+     * boolean, including genre/key. When those dims are drilled,
+     * {@link #execute()} uses a {@link DrillDownQuery} whose clauses are the
+     * same subqueries, so the printed string matches the scored doc set.
+     */
     private final class LuceneSession implements TrackSearchSession {
         private final String q;
         private final Map<String, List<String>> filters;
@@ -526,11 +588,17 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
             this.size = size;
         }
 
+        /** Flattened hits boolean, including genre/key — same doc set {@link #execute()} scores. */
         @Override
         public String printQuery() {
             return query(q, filters, mustNots).toString();
         }
 
+        /**
+         * Genre/key → {@link DrillSideways}; otherwise one
+         * {@link FacetsCollectorManager#search}. {@code size == 0} still uses
+         * topN 1 internally, then keeps an empty hit page.
+         */
         @Override
         public void execute() throws Exception {
             IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
@@ -550,26 +618,33 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
                     }
                 }
                 Query base = query(q, baseFilters, mustNots == null ? Map.of() : mustNots);
+                // Lucene TopDocsCollector rejects n == 0; slice the page after the search.
+                int topN = Math.max(1, size);
                 TopDocs topDocs;
                 Facets luceneFacets;
                 if (drill.isEmpty()) {
                     FacetsCollectorManager.FacetsResult collected = FacetsCollectorManager.search(
-                            searcher, query(q, filters, mustNots), size, new FacetsCollectorManager());
+                            searcher, query(q, filters, mustNots), topN, new FacetsCollectorManager());
                     topDocs = collected.topDocs();
                     luceneFacets = mix(state, collected.facetsCollector());
                 } else {
                     DrillDownQuery drillDown = new DrillDownQuery(FACETS, base);
                     drill.forEach((dim, values) ->
+                            // Same fieldQuery as printQuery, as a DrillDownQuery clause.
                             drillDown.add(dim, query("", Map.of(dim, values), Map.of())));
-                    var result = new TrackDrillSideways(searcher, state).search(drillDown, size);
+                    var result = new TrackDrillSideways(searcher, state).search(drillDown, topN);
                     topDocs = result.hits;
                     luceneFacets = result.facets;
                 }
+                int page = Math.min(size, topDocs.scoreDocs.length);
+                TopDocs pageDocs = page == topDocs.scoreDocs.length
+                        ? topDocs
+                        : new TopDocs(topDocs.totalHits, Arrays.copyOf(topDocs.scoreDocs, page));
                 List<Map<String, String>> highlighted =
-                        highlight(searcher, query(q, filters, mustNots), topDocs);
+                        highlight(searcher, query(q, filters, mustNots), pageDocs);
                 List<TrackHit> ordered = new ArrayList<>();
-                for (int i = 0; i < topDocs.scoreDocs.length; i++) {
-                    ScoreDoc hit = topDocs.scoreDocs[i];
+                for (int i = 0; i < pageDocs.scoreDocs.length; i++) {
+                    ScoreDoc hit = pageDocs.scoreDocs[i];
                     IndexableField id = searcher.storedFields().document(hit.doc).getField("id");
                     if (id == null) {
                         continue;
@@ -618,6 +693,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
             return facets;
         }
 
+        /** Lucene has no {@code _search} JSON; the LCD stays query-only. */
         @Override
         public String printResponse() {
             requireExecuted();
@@ -631,6 +707,10 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         }
     }
 
+    /**
+     * Sideways collectors keep the drilled dim's full histogram; other dims
+     * use the drill-down collector (already filtered by that dim).
+     */
     private static final class TrackDrillSideways extends DrillSideways {
         private final DefaultSortedSetDocValuesReaderState ssdvState;
 

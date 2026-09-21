@@ -31,6 +31,27 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Elasticsearch {@link TrackSearch}: one {@code POST /tracks/_search} per
+ * {@link TrackSearchSession#execute()}. Same public contract as
+ * {@link TrackSearchLuceneImpl}.
+ *
+ * <p>Genre and key <em>includes</em> are not in {@code query}. They sit on
+ * {@code post_filter} so aggregations still see the undrilled set. Filter
+ * aggregations then recreate drill-sideways:
+ * <ul>
+ *   <li>{@code genre} agg — filtered by key, not by genre</li>
+ *   <li>{@code key} agg — filtered by genre, not by key</li>
+ *   <li>{@code drill} (bpm, rating, year) — filtered by both</li>
+ * </ul>
+ * BPM / rating / year includes and all excludes stay in {@code query}, so those
+ * maps shrink like Lucene's non-sideways facets.
+ *
+ * <p>{@code size = 0} is aggregations-only: no hits, and this class omits
+ * {@code highlight}. {@link TrackSearchSession#printQuery()} is the pretty JSON
+ * body; {@link TrackSearchSession#printResponse()} is the pretty JSON response
+ * after a successful execute.
+ */
 public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     static final String INDEX = "tracks";
@@ -46,6 +67,11 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         this.client = client;
     }
 
+    /**
+     * Recreate index {@code tracks}: put the template (analyzer {@code track},
+     * {@code keyword_ci} normalizer, {@code .raw} / {@code .normalized}
+     * subfields), delete+create, bulk index, refresh.
+     */
     @Override
     public void rebuild(List<Track> tracks) throws IOException {
         client.indices().putIndexTemplate(t -> t
@@ -86,20 +112,32 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         client.indices().refresh(r -> r.index(INDEX));
     }
 
+    /**
+     * Snapshot {@code q} / filters / {@code size} into an Elasticsearch session.
+     * Filter maps are copied so later mutation cannot desync print vs execute.
+     */
     @Override
     public TrackSearchSession prepareRequest(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
-        if (size < 1) {
-            throw new IllegalArgumentException("size must be >= 1");
+        if (size < 0) {
+            throw new IllegalArgumentException("size must be >= 0");
         }
         return new ElasticsearchSession(q, filters, mustNots, size);
     }
 
+    /**
+     * {@code bool_prefix} multi-match on title / artist / genre, then keep
+     * suggestions whose highlight matches a whole prefix token.
+     */
     @Override
     public List<TrackSuggestion> suggest(String prefix) throws IOException {
         return suggest(prefix, null);
     }
 
+    /**
+     * Same as {@link #suggest(String)}. Empty {@code scope} → no suggestions.
+     * A non-empty scope is not used to restrict the query (unlike Lucene).
+     */
     @Override
     public List<TrackSuggestion> suggest(String prefix, Collection<Track> scope) throws IOException {
         if (prefix == null || prefix.isBlank() || (scope != null && scope.isEmpty())) {
@@ -141,6 +179,11 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     @Override
     public void close() {}
 
+    /**
+     * One {@code _search}: printable JSON body, then execute, then hits /
+     * facets / pretty JSON response. Assigns results only after the request
+     * succeeds so a failed re-run keeps the previous snapshot.
+     */
     private final class ElasticsearchSession implements TrackSearchSession {
         private final String q;
         private final Map<String, List<String>> filters;
@@ -160,11 +203,17 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
             this.size = size;
         }
 
+        /** Pretty JSON of {@code searchRequest(...)} — valid before {@link #execute()}. */
         @Override
         public String printQuery() {
             return prettyJson(JsonpUtils.toJsonString(searchRequest(q, filters, mustNots, size), JSONP));
         }
 
+        /**
+         * Single {@code _search}. Facet maps come from the filter aggregations
+         * on the same response (see class comment). {@code size == 0} yields
+         * an empty hit list and no highlight snippets.
+         */
         @Override
         public void execute() throws Exception {
             SearchResponse<Track> response = client.search(
@@ -210,6 +259,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
             return facets;
         }
 
+        /** Pretty JSON of the Elasticsearch response; requires {@link #execute()}. */
         @Override
         public String printResponse() {
             requireExecuted();
@@ -223,6 +273,12 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         }
     }
 
+    /**
+     * The {@code _search} body. {@code query} has free text, non-sideways
+     * includes, and all excludes. {@code post_filter} is genre+key includes
+     * only (narrows hits, not aggregations). Filter aggregations implement
+     * drill-sideways. Highlight is omitted when {@code size == 0}.
+     */
     private static SearchRequest searchRequest(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
         Map<String, List<String>> include = filters == null ? Map.of() : filters;
@@ -236,19 +292,21 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
             s.index(INDEX)
                     .size(size)
                     .trackTotalHits(t -> t.enabled(true))
-                    .query(query(q, withoutGenreAndKey, exclude))
-                    .highlight(h -> h
-                            .preTags("<b>")
-                            .postTags("</b>")
-                            .numberOfFragments(0)
-                            .fields(
-                                    NamedValue.of("title", HighlightField.of(f -> f)),
-                                    NamedValue.of("artist", HighlightField.of(f -> f)),
-                                    NamedValue.of("genre", HighlightField.of(f -> f)),
-                                    NamedValue.of("album", HighlightField.of(f -> f)),
-                                    NamedValue.of("label", HighlightField.of(f -> f)),
-                                    NamedValue.of("comment", HighlightField.of(f -> f))))
-                    .aggregations("genre", a -> a
+                    .query(query(q, withoutGenreAndKey, exclude));
+            if (size > 0) {
+                s.highlight(h -> h
+                        .preTags("<b>")
+                        .postTags("</b>")
+                        .numberOfFragments(0)
+                        .fields(
+                                NamedValue.of("title", HighlightField.of(f -> f)),
+                                NamedValue.of("artist", HighlightField.of(f -> f)),
+                                NamedValue.of("genre", HighlightField.of(f -> f)),
+                                NamedValue.of("album", HighlightField.of(f -> f)),
+                                NamedValue.of("label", HighlightField.of(f -> f)),
+                                NamedValue.of("comment", HighlightField.of(f -> f))));
+            }
+            s.aggregations("genre", a -> a
                             .filter(scoped(include, TrackFacets.KEY))
                             .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
                     .aggregations("key", a -> a
@@ -298,6 +356,12 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         }
     }
 
+    /**
+     * Bool: match-all or {@code bool_prefix} multi-match (same field boosts as
+     * Lucene), plus FILTER includes and MUST_NOT excludes. Callers that want
+     * drill-sideways must omit genre/key from {@code filters} and put them on
+     * {@code post_filter} instead.
+     */
     private static Query query(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
         return Query.of(qb -> qb.bool(b -> {
@@ -316,6 +380,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         }));
     }
 
+    /** Bool of include chips, or {@code null} when there is nothing to filter. */
     private static Query filterQuery(Map<String, List<String>> filters) {
         if (filters == null || filters.isEmpty()) {
             return null;
@@ -343,6 +408,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         });
     }
 
+    /** OR of chip values on one dimension; {@code null} if the dim is unknown or empty. */
     private static Query fieldFilter(String field, List<String> values) {
         if (field == null || field.isBlank() || values == null || values.isEmpty()) {
             return null;
@@ -368,6 +434,11 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         }));
     }
 
+    /**
+     * One chip. Text dims hit {@code .normalized}; Camelot uses the normalized
+     * {@code key} field (terms aggs use {@code key.raw}). BPM is half-open
+     * {@code [min, max)}; year is a decade range.
+     */
     private static Query fieldQuery(String field, String value) {
         return switch (field) {
             case "title", "artist", "genre" -> term(field + ".normalized", value);
@@ -429,6 +500,11 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         return out;
     }
 
+    /**
+     * Scope for a filter aggregation: match-all, or a bool of the named include
+     * dims. A sideways dim is listed here only when computing the <em>other</em>
+     * maps, never its own.
+     */
     private static Query scoped(Map<String, List<String>> filters, String... dims) {
         Map<String, List<String>> subset = new LinkedHashMap<>();
         if (filters != null) {
@@ -443,6 +519,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
         return query != null ? query : Query.of(qb -> qb.matchAll(m -> m));
     }
 
+    /** Analyzed text plus stored {@code .raw} keyword and case-folded {@code .normalized}. */
     private static Property textWithRaw() {
         return Property.of(p -> p.text(t -> t
                 .analyzer("track")
@@ -450,6 +527,9 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                 .fields("normalized", f -> f.keyword(k -> k.normalizer("keyword_ci")))));
     }
 
+    /**
+     * Inner aggregations of a {@code filter} agg, or empty if the parent is missing.
+     */
     private static Map<String, Aggregate> metrics(Aggregate drill) {
         if (drill != null && drill.isFilter()) {
             return drill.filter().aggregations();

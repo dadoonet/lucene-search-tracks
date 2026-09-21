@@ -80,9 +80,9 @@ class TrackSearchElasticsearchImplTest extends TrackSearchContractTest {
     }
 
     @Test
-    void printQuery_wrapperUsesSize1() throws Exception {
+    void printQuery_wrapperUsesSize0() throws Exception {
         JsonNode tree = new ObjectMapper().readTree(index().printQuery("Bob", Map.of(), Map.of()));
-        assertThat(tree.path("size").intValue()).isEqualTo(1);
+        assertThat(tree.path("size").intValue()).isEqualTo(0);
     }
 
     @Test

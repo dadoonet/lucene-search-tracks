@@ -15,9 +15,19 @@ public abstract class TrackSearchContractTest {
     protected abstract TrackSearch index();
 
     @Test
-    void prepareRequest_rejectsNonPositiveSize() {
-        assertThatThrownBy(() -> index().prepareRequest("Bob", Map.of(), Map.of(), 0))
+    void prepareRequest_rejectsNegativeSize() {
+        assertThatThrownBy(() -> index().prepareRequest("Bob", Map.of(), Map.of(), -1))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void session_sizeZero_returnsNoHitsButFacetsAndTotal() throws Exception {
+        TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 0);
+        session.execute();
+        assertThat(session.getHits()).isEmpty();
+        assertThat(session.totalHits()).isEqualTo(62);
+        assertThat(count(session.getFacets().genres(), "Club")).isEqualTo(26);
+        assertThat(session.getFacets().bpm().get("120 – 130")).isEqualTo(52L);
     }
 
     @Test
