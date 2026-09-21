@@ -131,7 +131,10 @@ class PlaygroundAppTest {
                     .contains("demo-backend")
                     .contains("demo-engine-opt")
                     .contains("setDemoBackend")
-                    .contains("\"curl\"")
+                    .contains("setDemoReadout")
+                    .contains("search.total")
+                    .contains("search.tokens")
+                    .doesNotContain("? \"curl\"")
                     .contains("/api/elasticsearch")
                     .contains("getElementById(\"es-url\")")
                     .contains("getElementById(\"es-api-key\")");
@@ -173,13 +176,14 @@ class PlaygroundAppTest {
     }
 
     @Test
-    void search_elasticsearchBackend_isConflictWhenOffline() {
+    void search_elasticsearchBackend_fallsBackToLuceneWhenOffline() {
         JavalinTest.test(PlaygroundApp.create(service), (server, client) -> {
             var response = client.post("/api/search?backend=elasticsearch", """
                     {"q":"Bob","filters":{},"mustNots":{}}
                     """);
-            assertThat(response.code()).isEqualTo(409);
-            assertThat(response.body().string()).contains("Elasticsearch");
+            assertThat(response.code()).isEqualTo(200);
+            String body = response.body().string();
+            assertThat(body).contains("\"total\":62").doesNotContain("curl");
         });
     }
 

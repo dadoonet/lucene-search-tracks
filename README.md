@@ -37,9 +37,11 @@ cat elastic-start-local/.env | grep ES_LOCAL_API_KEY
 ./start.sh
 ```
 
-The Demo tab can switch to Elasticsearch. Click the gear next to **Demo** to
+The Demo tab switches between the same Lucene and Elasticsearch `TrackSearch`
+implementations the contract tests use. Click the gear next to **Demo** to
 set the cluster URL (default `http://localhost:9200/`) and API key, then
-**Save and index** to rebuild the `tracks` index. 
+**Save and index** to rebuild the `tracks` index. If Elasticsearch is not
+ready, the Demo stays on Lucene. 
 
 `./start.sh` sources a local `.env` (or `elastic-start-local/.env`) and exports `ES_LOCAL_URL` /
 `ES_LOCAL_API_KEY` before `mvn compile exec:java`. When those credentials exist

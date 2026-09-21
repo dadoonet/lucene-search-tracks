@@ -1982,13 +1982,10 @@ function renderDemoHits(search) {
 }
 
 function setDemoReadout(search, facets) {
-  const engine = demoBackend() === "elasticsearch"
-      ? "curl"
-      : (facets.drillSideways ? "DrillSideways" : "FacetsCollector");
+  const engine = demoBackend() === "elasticsearch" ? "Elasticsearch" : "Lucene";
   readout(`
     <h3>${search.total} hits</h3>
-    <p class="muted">${engine}</p>
-    <pre class="demo-query">${escapeHtml(search.query)}</pre>
+    <p class="muted">${escapeHtml(engine)}</p>
     <h3>tokens</h3>
     <p>${(search.tokens || []).map((token) => `<span class="idx-chip">${escapeHtml(token)}</span>`).join(" ") || `<span class="muted">match-all</span>`}</p>`);
 }

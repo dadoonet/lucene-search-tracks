@@ -416,10 +416,10 @@ class PlaygroundServiceTest {
     }
 
     @Test
-    void search_elasticsearchBackend_rejectedUntilReady() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () -> service.search(new SearchRequest("Bob", Map.of(), Map.of(), null), "elasticsearch"))
-                .isInstanceOf(ElasticsearchNotReadyException.class)
-                .hasMessageContaining("Elasticsearch");
+    void search_elasticsearchBackend_fallsBackToLuceneWhenNotReady() throws Exception {
+        var bob = service.search(new SearchRequest("Bob", Map.of(), Map.of(), null), "elasticsearch");
+        assertThat(bob.total()).isEqualTo(62);
+        assertThat(bob.query()).contains("title:bob");
+        assertThat(bob.query()).doesNotContain("curl");
     }
 }

@@ -2,9 +2,11 @@ package fr.pilato.test.lucene.playground;
 
 import fr.pilato.test.lucene.Track;
 import fr.pilato.test.lucene.TrackDatasetLoader;
-import fr.pilato.test.lucene.playground.helpers.TrackHighlighter;
-import fr.pilato.test.lucene.TrackSuggestion;
+import fr.pilato.test.lucene.TrackFacetsResult;
+import fr.pilato.test.lucene.TrackHit;
+import fr.pilato.test.lucene.TrackSearch;
 import fr.pilato.test.lucene.TrackSearchLuceneImpl;
+import fr.pilato.test.lucene.TrackSuggestion;
 import fr.pilato.test.lucene.playground.helpers.PlaygroundLuceneHelper;
 import fr.pilato.test.lucene.playground.helpers.TrackAnalyzers;
 import fr.pilato.test.lucene.playground.helpers.TrackDocumentMapper;
@@ -14,18 +16,6 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredValue;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
 import org.apache.lucene.facet.FacetsConfig;
-import org.apache.lucene.facet.DrillDownQuery;
-import org.apache.lucene.facet.DrillSideways;
-import org.apache.lucene.facet.FacetResult;
-import org.apache.lucene.facet.Facets;
-import org.apache.lucene.facet.FacetsCollector;
-import org.apache.lucene.facet.FacetsCollectorManager;
-import org.apache.lucene.facet.LabelAndValue;
-import org.apache.lucene.facet.LongValueFacetCounts;
-import org.apache.lucene.facet.MultiFacets;
-import org.apache.lucene.facet.range.DoubleRangeFacetCounts;
-import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState;
-import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetCounts;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.MultiTerms;
@@ -33,13 +23,9 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.util.BytesRef;
@@ -52,7 +38,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -279,10 +264,36 @@ public final class PlaygroundService implements AutoCloseable {
     }
 
     public SearchResponse search(SearchRequest request, String backend) throws IOException {
+        TrackSearch engine = engine(backend);
+        String q = request == null || request.q() == null ? "" : request.q();
+        Map<String, List<String>> filters = request == null || request.filters() == null
+                ? Map.of() : request.filters();
+        Map<String, List<String>> mustNots = request == null || request.mustNots() == null
+                ? Map.of() : request.mustNots();
         long start = System.nanoTime();
-        SearchResponse response = isElasticsearch(backend)
-                ? elasticsearch.search(request)
-                : searchLucene(request);
+        List<TrackHit> all;
+        try {
+            all = engine.search(q, filters, mustNots);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
+        int total = all.size();
+        List<TrackHit> page = all.size() > TOP_HITS ? all.subList(0, TOP_HITS) : all;
+        List<SearchHitView> hits = new ArrayList<>();
+        for (TrackHit hit : page) {
+            Track t = hit.track();
+            hits.add(new SearchHitView(
+                    0, t.id(), t.title(), t.artist(), t.genre(), t.key(), t.bpm(), t.rating(), t.year(),
+                    hit.score(), null, null, hit.highlights()));
+        }
+        List<String> tokens = TrackAnalyzers.tokenize(q);
+        String query = String.join(" ", tokens);
+        SearchResponse response = new SearchResponse(q, tokens, query, total, List.copyOf(hits), 0);
+        if (engine == index) {
+            response = withLuceneOverlay(response, request, q, filters, mustNots);
+        }
         return withTook(response, start);
     }
 
@@ -290,59 +301,90 @@ public final class PlaygroundService implements AutoCloseable {
         return search(request, null);
     }
 
-    private SearchResponse searchLucene(SearchRequest request) throws IOException {
-        String q = request == null || request.q() == null ? "" : request.q();
-        Map<String, List<String>> filters = request == null || request.filters() == null
-                ? Map.of() : request.filters();
-        Map<String, List<String>> mustNots = request == null || request.mustNots() == null
-                ? Map.of() : request.mustNots();
+    private TrackSearch engine(String backend) {
+        if (isElasticsearch(backend) && elasticsearch.ready()) {
+            TrackSearch es = elasticsearch.trackSearch();
+            if (es != null) {
+                return es;
+            }
+        }
+        return index;
+    }
+
+    private SearchResponse withLuceneOverlay(
+            SearchResponse response,
+            SearchRequest request,
+            String q,
+            Map<String, List<String>> filters,
+            Map<String, List<String>> mustNots) throws IOException {
         Query lucene = TrackLuceneQueryBuilder.buildStructured(q, filters, mustNots);
-        List<String> tokens = TrackAnalyzers.tokenize(q);
+        List<String> tokens = response.tokens();
+        Integer explainDoc = request == null ? null : request.explainDoc();
         IndexSearcher searcher = luceneIndex.searcher();
         try (IndexReader reader = searcher.getIndexReader()) {
-            TopDocs top = searcher.search(lucene, TOP_HITS);
-            List<Map<String, String>> highlighted = TrackHighlighter.highlight(searcher, lucene, top);
-            int total = Math.toIntExact(top.totalHits.value());
-            Integer explainDoc = request == null ? null : request.explainDoc();
+            Map<String, Integer> docsById = luceneDocsById(searcher, response.hits());
             List<SearchHitView> hits = new ArrayList<>();
-            for (int i = 0; i < top.scoreDocs.length; i++) {
-                ScoreDoc hit = top.scoreDocs[i];
-                var idField = searcher.storedFields()
-                        .document(hit.doc)
-                        .getField(TrackDocumentMapper.ID);
-                if (idField == null) {
-                    continue;
-                }
-                Track track = byId.get(idField.stringValue());
-                if (track == null) {
-                    continue;
-                }
-                Explanation expl = null;
-                if (explainDoc != null && explainDoc == hit.doc) {
-                    expl = searcher.explain(lucene, hit.doc);
-                }
-                Map<String, String> snippets = i < highlighted.size() ? highlighted.get(i) : Map.of();
-                hits.add(searchHit(hit.doc, track, hit.score, expl, tokens, snippets));
+            for (SearchHitView hit : response.hits()) {
+                int luceneDoc = docsById.getOrDefault(hit.id(), hit.luceneDoc());
+                hits.add(new SearchHitView(
+                        luceneDoc,
+                        hit.id(),
+                        hit.title(),
+                        hit.artist(),
+                        hit.genre(),
+                        hit.key(),
+                        hit.bpm(),
+                        hit.rating(),
+                        hit.year(),
+                        hit.score(),
+                        hit.explain(),
+                        hit.explainTree(),
+                        hit.highlights()));
             }
-            if (explainDoc == null && !hits.isEmpty()) {
-                SearchHitView first = hits.getFirst();
-                Explanation expl = searcher.explain(lucene, first.luceneDoc());
-                hits.set(0, searchHit(
-                        first.luceneDoc(),
-                        byId.get(first.id()),
-                        first.score(),
-                        expl,
-                        tokens,
-                        first.highlights()));
+            if (!hits.isEmpty()) {
+                int target = explainDoc == null ? hits.getFirst().luceneDoc() : explainDoc;
+                for (int i = 0; i < hits.size(); i++) {
+                    SearchHitView hit = hits.get(i);
+                    if (hit.luceneDoc() != target) {
+                        continue;
+                    }
+                    Explanation expl = searcher.explain(lucene, hit.luceneDoc());
+                    Track track = byId.get(hit.id());
+                    if (track != null) {
+                        hits.set(i, searchHit(
+                                hit.luceneDoc(),
+                                track,
+                                hit.score(),
+                                expl,
+                                tokens,
+                                hit.highlights()));
+                    }
+                    break;
+                }
             }
             return new SearchResponse(
-                    q,
+                    response.q(),
                     tokens,
                     lucene.toString(),
-                    total,
+                    response.total(),
                     List.copyOf(hits),
-                    0);
+                    response.tookMs());
         }
+    }
+
+    private static Map<String, Integer> luceneDocsById(IndexSearcher searcher, List<SearchHitView> hits)
+            throws IOException {
+        Map<String, Integer> docs = new HashMap<>();
+        for (SearchHitView hit : hits) {
+            if (hit.id() == null || hit.id().isBlank()) {
+                continue;
+            }
+            TopDocs found = searcher.search(new TermQuery(new Term(TrackDocumentMapper.ID, hit.id())), 1);
+            if (found.scoreDocs.length > 0) {
+                docs.put(hit.id(), found.scoreDocs[0].doc);
+            }
+        }
+        return docs;
     }
 
     private static SearchResponse withTook(SearchResponse response, long startNanos) {
@@ -406,13 +448,13 @@ public final class PlaygroundService implements AutoCloseable {
     }
 
     public SuggestResponse suggest(String prefix, String backend) throws Exception {
-        if (isElasticsearch(backend)) {
-            return elasticsearch.suggest(prefix);
-        }
         String value = prefix == null ? "" : prefix;
         List<SuggestHitView> hits = new ArrayList<>();
-        for (TrackSuggestion suggestion : index.suggest(value)) {
-            hits.add(new SuggestHitView(suggestion.text(), suggestion.field(), suggestion.highlight()));
+        for (TrackSuggestion suggestion : engine(backend).suggest(value)) {
+            hits.add(new SuggestHitView(
+                    suggestion.text(),
+                    suggestion.field(),
+                    bTags(suggestion.highlight())));
         }
         return new SuggestResponse(value, List.copyOf(hits));
     }
@@ -437,53 +479,27 @@ public final class PlaygroundService implements AutoCloseable {
     public FacetsResponse facets(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, String backend)
             throws Exception {
-        if (isElasticsearch(backend)) {
-            return elasticsearch.facets(q, filters, mustNots);
-        }
+        TrackSearch engine = engine(backend);
         String queryText = q == null ? "" : q;
         Map<String, List<String>> include = filters == null ? Map.of() : filters;
         Map<String, List<String>> exclude = mustNots == null ? Map.of() : mustNots;
         List<String> genres = include.getOrDefault("genre", List.of()).stream()
                 .filter(value -> value != null && !value.isBlank())
                 .toList();
-        Map<String, List<String>> withoutGenre = new LinkedHashMap<>(include);
-        withoutGenre.remove("genre");
-        Query base = TrackLuceneQueryBuilder.buildStructured(queryText, withoutGenre, exclude);
-        Map<String, List<String>> withoutKey = new LinkedHashMap<>(include);
-        withoutKey.remove("key");
-        Map<String, List<String>> excludeWithoutKey = new LinkedHashMap<>(exclude);
-        excludeWithoutKey.remove("key");
-        Query keyBase = TrackLuceneQueryBuilder.buildStructured(queryText, withoutKey, excludeWithoutKey);
-        IndexSearcher searcher = luceneIndex.searcher();
-        try (IndexReader reader = searcher.getIndexReader()) {
-            var state = new DefaultSortedSetDocValuesReaderState(reader, TrackFacets.config());
-            Facets facets;
-            boolean sideways = !genres.isEmpty();
-            if (sideways) {
-                DrillDownQuery drillDown = new DrillDownQuery(TrackFacets.config(), base);
-                for (String genre : genres) {
-                    drillDown.add(TrackFacets.GENRE, new TermQuery(new Term(TrackDocumentMapper.GENRE_RAW, genre)));
-                }
-                facets = new PlaygroundDrillSideways(searcher, state).search(drillDown, 1).facets;
-            } else {
-                FacetsCollector collector = FacetsCollectorManager.search(
-                                searcher, base, 1, new FacetsCollectorManager())
-                        .facetsCollector();
-                facets = mix(state, collector);
-            }
-            return new FacetsResponse(
-                    queryText,
-                    base.toString(),
-                    sideways,
-                    String.join(", ", genres),
-                    List.of(
-                            dim("genre", "🏷️", children(facets.getAllChildren(TrackFacets.GENRE), 12)),
-                            dim("rating", "⭐", ratings(facets.getAllChildren(TrackDocumentMapper.RATING))),
-                            dim("year", "📅", decades(facets.getAllChildren(TrackDocumentMapper.YEAR))),
-                            dim("bpm", "⏱", bpmBuckets(facets.getAllChildren(TrackDocumentMapper.BPM))),
-                            dim(TrackFacets.KEY, "🎹", camelotKeys(searcher, keyBase))),
-                    facetRewrite());
-        }
+        TrackFacetsResult raw = engine.facets(queryText, include, exclude);
+        boolean sideways = !genres.isEmpty();
+        return new FacetsResponse(
+                queryText,
+                "",
+                sideways,
+                String.join(", ", genres),
+                List.of(
+                        dim("genre", "🏷️", children(raw.genres(), 12)),
+                        dim("rating", "⭐", ratings(raw.ratings())),
+                        dim("year", "📅", decades(raw.years())),
+                        dim("bpm", "⏱", bpmBuckets(raw.bpm())),
+                        dim(TrackFacets.KEY, "🎹", camelot(raw.keys()))),
+                engine == index ? facetRewrite() : new FacetRewrite(List.of(), List.of()));
     }
 
     @Override
@@ -501,21 +517,6 @@ public final class PlaygroundService implements AutoCloseable {
 
     private static boolean isElasticsearch(String backend) {
         return backend != null && "elasticsearch".equalsIgnoreCase(backend.trim());
-    }
-
-    private static Facets mix(DefaultSortedSetDocValuesReaderState state, FacetsCollector hits)
-            throws IOException {
-        FacetsCollector collector = hits != null ? hits : new FacetsCollector();
-        Map<String, Facets> byDim = new LinkedHashMap<>();
-        Facets ssdv = new SortedSetDocValuesFacetCounts(state, collector);
-        byDim.put(TrackFacets.GENRE, ssdv);
-        byDim.put(TrackDocumentMapper.BPM, new DoubleRangeFacetCounts(
-                TrackDocumentMapper.BPM, collector, TrackFacets.bpmRanges()));
-        byDim.put(TrackDocumentMapper.RATING, new LongValueFacetCounts(
-                TrackDocumentMapper.RATING, collector));
-        byDim.put(TrackDocumentMapper.YEAR, new LongValueFacetCounts(
-                TrackDocumentMapper.YEAR, collector));
-        return new MultiFacets(byDim);
     }
 
     private FacetRewrite facetRewrite() throws IOException {
@@ -566,38 +567,26 @@ public final class PlaygroundService implements AutoCloseable {
         return new FacetDim(name, emoji, buckets);
     }
 
-    /** Always 1A…12B, including empty slots. Ignores an active key FILTER / MUST_NOT. */
-    private static List<FacetBucket> camelotKeys(IndexSearcher searcher, Query base) throws IOException {
+    /** Always 1A…12B, including empty slots. */
+    private static List<FacetBucket> camelot(Map<String, Long> counts) {
+        Map<String, Long> map = counts == null ? Map.of() : counts;
         List<FacetBucket> buckets = new ArrayList<>(TrackFacets.CAMELOT_CODES.size());
         for (String code : TrackFacets.CAMELOT_CODES) {
-            buckets.add(new FacetBucket(code, searcher.count(withKey(base, code))));
+            buckets.add(new FacetBucket(code, countIgnoreCase(map, code)));
         }
         return List.copyOf(buckets);
     }
 
-    private static Query withKey(Query base, String code) {
-        Query term = new TermQuery(new Term(
-                TrackDocumentMapper.KEY_CODE, code.toLowerCase(Locale.ROOT)));
-        if (base instanceof MatchAllDocsQuery) {
-            return term;
-        }
-        return new BooleanQuery.Builder()
-                .add(base, BooleanClause.Occur.MUST)
-                .add(term, BooleanClause.Occur.FILTER)
-                .build();
-    }
-
-    private static List<FacetBucket> children(FacetResult result, int limit) {
-        if (result == null || result.labelValues == null) {
+    private static List<FacetBucket> children(Map<String, Long> counts, int limit) {
+        if (counts == null || counts.isEmpty()) {
             return List.of();
         }
         List<FacetBucket> buckets = new ArrayList<>();
-        for (LabelAndValue value : result.labelValues) {
-            if (value.value.longValue() <= 0) {
-                continue;
+        counts.forEach((label, count) -> {
+            if (count != null && count > 0) {
+                buckets.add(new FacetBucket(label, count));
             }
-            buckets.add(new FacetBucket(value.label, value.value.longValue()));
-        }
+        });
         buckets.sort((a, b) -> Long.compare(b.count(), a.count()));
         if (buckets.size() > limit) {
             return List.copyOf(buckets.subList(0, limit));
@@ -606,11 +595,11 @@ public final class PlaygroundService implements AutoCloseable {
     }
 
     /** BPM ranges in definition order (0–80 … 220+), skipping empty buckets. */
-    private static List<FacetBucket> bpmBuckets(FacetResult result) {
-        Map<String, Long> counts = countsByLabel(result);
+    private static List<FacetBucket> bpmBuckets(Map<String, Long> counts) {
+        Map<String, Long> map = counts == null ? Map.of() : counts;
         List<FacetBucket> buckets = new ArrayList<>();
         for (var range : TrackFacets.bpmRanges()) {
-            long count = counts.getOrDefault(range.label, 0L);
+            long count = map.getOrDefault(range.label, 0L);
             if (count > 0) {
                 buckets.add(new FacetBucket(range.label, count));
             }
@@ -619,39 +608,44 @@ public final class PlaygroundService implements AutoCloseable {
     }
 
     /** Always 5★ → 0★, including empty buckets. */
-    private static List<FacetBucket> ratings(FacetResult result) {
-        Map<String, Long> counts = countsByLabel(result);
+    private static List<FacetBucket> ratings(Map<String, Long> counts) {
+        Map<String, Long> map = counts == null ? Map.of() : counts;
         List<FacetBucket> buckets = new ArrayList<>(6);
         for (int stars = 5; stars >= 0; stars--) {
             String label = Integer.toString(stars);
-            buckets.add(new FacetBucket(label, counts.getOrDefault(label, 0L)));
+            buckets.add(new FacetBucket(label, countIgnoreCase(map, label)));
         }
         return List.copyOf(buckets);
     }
 
-    private static List<FacetBucket> decades(FacetResult result) {
-        if (result == null || result.labelValues == null) {
+    private static List<FacetBucket> decades(Map<String, Long> years) {
+        if (years == null || years.isEmpty()) {
             return List.of();
         }
         Map<String, Long> grouped = new HashMap<>();
-        for (LabelAndValue value : result.labelValues) {
-            int year;
-            try {
-                year = Integer.parseInt(value.label);
-            } catch (NumberFormatException e) {
-                continue;
+        years.forEach((label, count) -> {
+            if (label == null || count == null || count <= 0) {
+                return;
             }
-            String label = TrackFacets.decadeLabel(year);
-            if (label == null) {
-                continue;
+            String decade = TrackFacets.decadeBounds(label) != null
+                    ? label
+                    : decadeFromRawYear(label);
+            if (decade != null) {
+                grouped.merge(decade, count, Long::sum);
             }
-            grouped.merge(label, value.value.longValue(), Long::sum);
-        }
+        });
         return grouped.entrySet().stream()
-                .filter(entry -> entry.getValue() > 0)
                 .map(entry -> new FacetBucket(entry.getKey(), entry.getValue()))
                 .sorted(Comparator.comparingInt(bucket -> decadeStart(bucket.label())))
                 .toList();
+    }
+
+    private static String decadeFromRawYear(String label) {
+        try {
+            return TrackFacets.decadeLabel(Integer.parseInt(label));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static int decadeStart(String label) {
@@ -659,15 +653,25 @@ public final class PlaygroundService implements AutoCloseable {
         return bounds == null ? Integer.MAX_VALUE : bounds[0];
     }
 
-    private static Map<String, Long> countsByLabel(FacetResult result) {
-        Map<String, Long> counts = new HashMap<>();
-        if (result == null || result.labelValues == null) {
-            return counts;
+    private static long countIgnoreCase(Map<String, Long> counts, String label) {
+        Long exact = counts.get(label);
+        if (exact != null) {
+            return exact;
         }
-        for (LabelAndValue value : result.labelValues) {
-            counts.put(value.label, value.value.longValue());
+        for (Map.Entry<String, Long> entry : counts.entrySet()) {
+            if (label.equalsIgnoreCase(entry.getKey()) && entry.getValue() != null) {
+                return entry.getValue();
+            }
         }
-        return counts;
+        return 0;
+    }
+
+    private static String bTags(String html) {
+        if (html == null) {
+            return null;
+        }
+        return html.replace("<em>", "<b>").replace("</em>", "</b>")
+                .replace("<EM>", "<b>").replace("</EM>", "</b>");
     }
 
     private static String stored(IndexableField field) {
@@ -729,30 +733,5 @@ public final class PlaygroundService implements AutoCloseable {
             case TrackDocumentMapper.RATING, TrackDocumentMapper.YEAR -> "numeric filter / sort";
             default -> "stored field";
         };
-    }
-
-    private static final class PlaygroundDrillSideways extends DrillSideways {
-        private final DefaultSortedSetDocValuesReaderState state;
-
-        private PlaygroundDrillSideways(IndexSearcher searcher, DefaultSortedSetDocValuesReaderState state) {
-            super(searcher, TrackFacets.config(), state);
-            this.state = state;
-        }
-
-        @Override
-        protected Facets buildFacetsResult(
-                FacetsCollector drillDowns,
-                FacetsCollector[] drillSideways,
-                String[] drillSidewaysDims) throws IOException {
-            Facets drillDownFacets = mix(state, drillDowns);
-            if (drillSideways == null || drillSideways.length == 0) {
-                return drillDownFacets;
-            }
-            Map<String, Facets> sideways = new LinkedHashMap<>();
-            for (int i = 0; i < drillSideways.length; i++) {
-                sideways.put(drillSidewaysDims[i], mix(state, drillSideways[i]));
-            }
-            return new MultiFacets(sideways, drillDownFacets);
-        }
     }
 }
