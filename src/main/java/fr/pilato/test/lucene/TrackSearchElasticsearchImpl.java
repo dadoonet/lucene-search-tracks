@@ -55,7 +55,9 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                                 .properties("album", textWithRaw())
                                 .properties("label", textWithRaw())
                                 .properties("comment", textWithRaw())
-                                .properties("key", p -> p.keyword(k -> k.normalizer("keyword_ci")))
+                                .properties("key", p -> p.keyword(k -> k
+                                        .normalizer("keyword_ci")
+                                        .fields("raw", f -> f.keyword(kw -> kw))))
                                 .properties("bpm", p -> p.double_(d -> d))
                                 .properties("rating", p -> p.integer(i -> i))
                                 .properties("year", p -> p.integer(i -> i)))));
@@ -108,7 +110,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                                 .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
                         .aggregations("key", a -> a
                                 .filter(scoped(include, TrackFacets.GENRE))
-                                .aggregations("key", m -> m.terms(t -> t.field("key").size(24))))
+                                .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(24))))
                         .aggregations("drill", a -> a
                                 .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
                                 .aggregations("bpm", m -> m.range(r -> {

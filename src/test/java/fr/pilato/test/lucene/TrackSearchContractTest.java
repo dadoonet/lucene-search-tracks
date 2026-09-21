@@ -74,6 +74,8 @@ public abstract class TrackSearchContractTest {
         assertThat(count(facets.ratings(), "5")).isEqualTo(13);
         assertThat(facets.years().get("2020–2029")).isEqualTo(15L);
         assertThat(facets.keys()).isNotEmpty();
+        assertThat(facets.keys()).containsKey("4B");
+        assertThat(facets.keys()).doesNotContainKey("4b");
         assertThat(facets.bpm().keySet()).contains("120 – 130");
         TrackTestLog.facets("Bob", List.of(
                 new TrackTestLog.FacetLine("🏷️", "Club", 26),
