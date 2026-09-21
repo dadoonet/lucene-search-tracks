@@ -6,6 +6,7 @@ import fr.pilato.test.lucene.TrackFacetsResult;
 import fr.pilato.test.lucene.TrackHit;
 import fr.pilato.test.lucene.TrackSearch;
 import fr.pilato.test.lucene.TrackSearchLuceneImpl;
+import fr.pilato.test.lucene.TrackSearchSession;
 import fr.pilato.test.lucene.TrackSuggestion;
 import fr.pilato.test.lucene.playground.helpers.PlaygroundLuceneHelper;
 import fr.pilato.test.lucene.playground.helpers.TrackAnalyzers;
@@ -271,40 +272,37 @@ public final class PlaygroundService implements AutoCloseable {
         Map<String, List<String>> mustNots = request == null || request.mustNots() == null
                 ? Map.of() : request.mustNots();
         long start = System.nanoTime();
-        List<TrackHit> all;
-        try {
-            all = engine.search(q, filters, mustNots);
-        } catch (IOException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
-        int total = all.size();
-        List<TrackHit> page = all.size() > TOP_HITS ? all.subList(0, TOP_HITS) : all;
-        List<SearchHitView> hits = new ArrayList<>();
-        for (TrackHit hit : page) {
-            Track t = hit.track();
-            hits.add(new SearchHitView(
-                    0, t.id(), t.title(), t.artist(), t.genre(), t.key(), t.bpm(), t.rating(), t.year(),
-                    hit.score(), null, null, hit.highlights()));
-        }
         List<String> tokens = TrackAnalyzers.tokenize(q);
-        String printed;
+        TrackSearchSession session;
         try {
-            printed = engine.printQuery(q, filters, mustNots);
+            session = engine.prepareRequest(q, filters, mustNots, TOP_HITS);
+            String printed = session.printQuery();
+            if (engine != index) {
+                printed = ElasticsearchCurl.wrap(elasticsearch.settings(), printed);
+            }
+            session.execute();
+            List<TrackHit> page = session.getHits();
+            int total = session.totalHits();
+            String engineResponse = session.printResponse();
+            List<FacetDim> dims = facetDims(session.getFacets());
+            List<SearchHitView> hits = new ArrayList<>();
+            for (TrackHit hit : page) {
+                Track t = hit.track();
+                hits.add(new SearchHitView(
+                        0, t.id(), t.title(), t.artist(), t.genre(), t.key(), t.bpm(), t.rating(), t.year(),
+                        hit.score(), null, null, hit.highlights()));
+            }
+            SearchResponse response = new SearchResponse(
+                    q, tokens, printed, engineResponse, total, List.copyOf(hits), 0, dims);
+            if (engine == index) {
+                response = withLuceneOverlay(response, request, q, filters, mustNots);
+            }
+            return withTook(response, start);
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {
             throw new IOException(e);
         }
-        if (engine != index) {
-            printed = ElasticsearchCurl.wrap(elasticsearch.settings(), printed);
-        }
-        SearchResponse response = new SearchResponse(q, tokens, printed, total, List.copyOf(hits), 0);
-        if (engine == index) {
-            response = withLuceneOverlay(response, request, q, filters, mustNots);
-        }
-        return withTook(response, start);
     }
 
     public SearchResponse search(SearchRequest request) throws IOException {
@@ -376,9 +374,11 @@ public final class PlaygroundService implements AutoCloseable {
                     response.q(),
                     tokens,
                     response.query(),
+                    response.response(),
                     response.total(),
                     List.copyOf(hits),
-                    response.tookMs());
+                    response.tookMs(),
+                    response.dims());
         }
     }
 
@@ -403,9 +403,11 @@ public final class PlaygroundService implements AutoCloseable {
                 response.q(),
                 response.tokens(),
                 response.query(),
+                response.response(),
                 response.total(),
                 response.hits(),
-                tookMs);
+                tookMs,
+                response.dims());
     }
 
     private static SearchHitView searchHit(
@@ -507,13 +509,17 @@ public final class PlaygroundService implements AutoCloseable {
                 printed,
                 sideways,
                 String.join(", ", genres),
-                List.of(
-                        dim("genre", "🏷️", children(raw.genres(), 12)),
-                        dim("rating", "⭐", ratings(raw.ratings())),
-                        dim("year", "📅", decades(raw.years())),
-                        dim("bpm", "⏱", bpmBuckets(raw.bpm())),
-                        dim(TrackFacets.KEY, "🎹", camelot(raw.keys()))),
+                facetDims(raw),
                 engine == index ? facetRewrite() : new FacetRewrite(List.of(), List.of()));
+    }
+
+    private static List<FacetDim> facetDims(TrackFacetsResult raw) {
+        return List.of(
+                dim("genre", "🏷️", children(raw.genres(), 12)),
+                dim("rating", "⭐", ratings(raw.ratings())),
+                dim("year", "📅", decades(raw.years())),
+                dim("bpm", "⏱", bpmBuckets(raw.bpm())),
+                dim(TrackFacets.KEY, "🎹", camelot(raw.keys())));
     }
 
     @Override

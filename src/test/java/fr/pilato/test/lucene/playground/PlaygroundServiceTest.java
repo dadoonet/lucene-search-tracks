@@ -13,6 +13,7 @@ import java.util.Map;
 
 import static fr.pilato.test.lucene.playground.helpers.TrackFacets.CAMELOT_CODES;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetBucket;
+import static fr.pilato.test.lucene.playground.PlaygroundModels.FacetDim;
 import static fr.pilato.test.lucene.playground.PlaygroundModels.SearchRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -196,6 +197,9 @@ class PlaygroundServiceTest {
         assertThat(bob.total()).isEqualTo(62);
         assertThat(bob.hits()).hasSize(25);
         assertThat(bob.query()).contains("title:bob");
+        assertThat(bob.dims()).isNotEmpty();
+        assertThat(countDim(bob.dims(), "genre", "Club")).isEqualTo(26);
+        assertThat(bob.response()).isEmpty(); // Lucene
         assertThat(bob.hits()).isNotEmpty();
         assertThat(bob.hits().getFirst().explain()).contains("bob");
         assertThat(bob.tookMs()).isGreaterThanOrEqualTo(0);
@@ -362,6 +366,16 @@ class PlaygroundServiceTest {
                         tuple("SortedSetDocValuesField", "$facets", "genre\\u001FClub"),
                         tuple("StringField", "$facets", "genre\\u001FClub"),
                         tuple("StringField", "$facets", "genre"));
+    }
+
+    private static long countDim(List<FacetDim> dims, String name, String label) {
+        return dims.stream()
+                .filter(d -> name.equals(d.name()))
+                .flatMap(d -> d.buckets().stream())
+                .filter(b -> label.equals(b.label()))
+                .mapToLong(FacetBucket::count)
+                .findFirst()
+                .orElse(0L);
     }
 
     private static long count(PlaygroundModels.FacetsResponse response, String dim, String label) {

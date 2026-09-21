@@ -84,7 +84,9 @@ class PlaygroundAppTest {
             assertThat(response.body().string())
                     .contains("\"explainTree\"")
                     .contains("term:title:bob")
-                    .contains("prefix:title:bob");
+                    .contains("prefix:title:bob")
+                    .contains("\"dims\"")
+                    .contains("\"response\"");
         });
     }
 

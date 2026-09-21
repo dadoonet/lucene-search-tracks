@@ -83,9 +83,11 @@ public final class PlaygroundModels {
             String q,
             List<String> tokens,
             String query,
+            String response,
             int total,
             List<SearchHitView> hits,
-            long tookMs) {}
+            long tookMs,
+            List<FacetDim> dims) {}
 
     public record SuggestHitView(String text, String field, String highlight) {}
 
