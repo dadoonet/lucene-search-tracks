@@ -83,7 +83,9 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     private static final float LABEL_BOOST = 1.0f;
     private static final float COMMENT_BOOST = 0.5f;
     private static final float PREFIX_BOOST = 0.25f;
-    private static final String[] HIGHLIGHT_FIELDS = {"title", "artist", "genre"};
+    private static final int HIGHLIGHT_LIMIT = 25;
+    private static final String[] HIGHLIGHT_FIELDS = {
+            "title", "artist", "genre", "album", "label", "comment"};
     private static final FacetsConfig FACETS = new FacetsConfig();
 
     private final Directory directory;
@@ -131,7 +133,7 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
         try (IndexReader reader = searcher.getIndexReader()) {
             int limit = Math.max(1, reader.numDocs());
             TopDocs hits = searcher.search(lucene, limit);
-            List<Map<String, String>> highlighted = highlight(searcher, lucene, hits);
+            List<Map<String, String>> highlighted = highlight(searcher, lucene, firstHits(hits, HIGHLIGHT_LIMIT));
             List<TrackHit> ordered = new ArrayList<>();
             for (int i = 0; i < hits.scoreDocs.length; i++) {
                 ScoreDoc hit = hits.scoreDocs[i];
@@ -148,6 +150,15 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
             }
             return List.copyOf(ordered);
         }
+    }
+
+    private static TopDocs firstHits(TopDocs hits, int n) {
+        if (hits.scoreDocs.length <= n) {
+            return hits;
+        }
+        ScoreDoc[] page = new ScoreDoc[n];
+        System.arraycopy(hits.scoreDocs, 0, page, 0, n);
+        return new TopDocs(hits.totalHits, page);
     }
 
     private static List<Map<String, String>> highlight(

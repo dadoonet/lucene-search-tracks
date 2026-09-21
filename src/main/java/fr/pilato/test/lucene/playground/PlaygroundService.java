@@ -488,9 +488,12 @@ public final class PlaygroundService implements AutoCloseable {
                 .toList();
         TrackFacetsResult raw = engine.facets(queryText, include, exclude);
         boolean sideways = !genres.isEmpty();
+        String luceneQuery = engine == index
+                ? TrackLuceneQueryBuilder.buildStructured(queryText, include, exclude).toString()
+                : "";
         return new FacetsResponse(
                 queryText,
-                "",
+                luceneQuery,
                 sideways,
                 String.join(", ", genres),
                 List.of(

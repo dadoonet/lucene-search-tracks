@@ -87,6 +87,17 @@ public abstract class TrackSearchContractTest {
     }
 
     @Test
+    void search_highlightsLabelWhenTermMatchesLabel() throws Exception {
+        assertThat(index().search("wagram", Map.of(), Map.of()))
+                .filteredOn(hit -> hit.highlights().get("label") != null)
+                .isNotEmpty()
+                .allSatisfy(hit -> {
+                    assertThat(hit.highlights().get("label")).containsIgnoringCase("wagram");
+                    assertThat(hit.highlights().get("label")).contains("<b>");
+                });
+    }
+
+    @Test
     void bob_countsGenreBpmRatingYear() throws Exception {
         TrackFacetsResult facets = index().facets("Bob", Map.of());
         assertThat(facets.genres()).containsKey("Club");
@@ -117,6 +128,21 @@ public abstract class TrackSearchContractTest {
                 "Club",
                 count(facets.genres(), "Dance"),
                 facets.bpm().getOrDefault("120 – 130", 0L));
+    }
+
+    @Test
+    void filteringKey_doesNotShrinkOtherKeyCounts() throws Exception {
+        TrackFacetsResult unfiltered = index().facets("Bob", Map.of());
+        TrackFacetsResult filtered = index().facets("Bob", Map.of("key", List.of("4B")));
+        assertThat(count(filtered.keys(), "4A")).isEqualTo(count(unfiltered.keys(), "4A"));
+        assertThat(count(filtered.keys(), "4B")).isEqualTo(count(unfiltered.keys(), "4B"));
+    }
+
+    @Test
+    void mustNotGenreClub_hidesClubKeepsDance() throws Exception {
+        TrackFacetsResult facets = index().facets("Bob", Map.of(), Map.of("genre", List.of("Club")));
+        assertThat(count(facets.genres(), "Club")).isZero();
+        assertThat(count(facets.genres(), "Dance")).isGreaterThan(0);
     }
 
     @Test

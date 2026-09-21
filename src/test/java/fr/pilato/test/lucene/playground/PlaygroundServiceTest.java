@@ -194,6 +194,7 @@ class PlaygroundServiceTest {
     void search_bobMatchesBlogCountsAndExplainsTopHit() throws Exception {
         var bob = service.search(new SearchRequest("Bob", Map.of(), Map.of(), null));
         assertThat(bob.total()).isEqualTo(62);
+        assertThat(bob.hits()).hasSize(25);
         assertThat(bob.query()).contains("title:bob");
         assertThat(bob.hits()).isNotEmpty();
         assertThat(bob.hits().getFirst().explain()).contains("bob");
@@ -253,6 +254,7 @@ class PlaygroundServiceTest {
     @Test
     void facets_bobCountsClubAndKeepsDanceWhenDrilling() throws Exception {
         var bob = service.facets("Bob", "");
+        assertThat(bob.query()).isNotBlank().contains("title:bob");
         assertThat(count(bob, "genre", "Club")).isEqualTo(26);
         assertThat(count(bob, "bpm", "120 – 130")).isEqualTo(52);
 

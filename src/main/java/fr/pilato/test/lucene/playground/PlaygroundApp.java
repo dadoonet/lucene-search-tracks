@@ -50,8 +50,6 @@ public final class PlaygroundApp {
     public static Javalin create(PlaygroundService service) {
         return Javalin.create(config -> {
             config.staticFiles.add("/public", Location.CLASSPATH);
-            config.routes.exception(ElasticsearchNotReadyException.class, (e, ctx) ->
-                    ctx.status(409).json(Map.of("error", String.valueOf(e.getMessage()))));
             config.routes.exception(Exception.class, (e, ctx) ->
                     ctx.status(500).json(Map.of("error", String.valueOf(e.getMessage()))));
             config.routes.get("/", ctx -> ctx.html(indexHtml()));

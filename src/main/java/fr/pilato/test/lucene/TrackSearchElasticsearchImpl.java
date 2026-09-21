@@ -28,6 +28,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     static final String INDEX = "tracks";
     private static final int SUGGEST_LIMIT = 10;
+    private static final int HIGHLIGHT_LIMIT = 25;
     private static final Pattern HIGHLIGHT = Pattern.compile("<em>(.*?)</em>", Pattern.CASE_INSENSITIVE);
 
     private final ElasticsearchClient client;
@@ -80,23 +81,43 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     public List<TrackHit> search(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
             throws IOException {
+        Query dsl = query(q, filters, mustNots);
         SearchResponse<Track> response = client.search(s -> s
                         .index(INDEX)
                         .size(10_000)
-                        .query(query(q, filters, mustNots))
-                        .highlight(h -> h
-                                .preTags("<b>")
-                                .postTags("</b>")
-                                .numberOfFragments(0)
-                                .fields(
-                                        NamedValue.of("title", HighlightField.of(f -> f)),
-                                        NamedValue.of("artist", HighlightField.of(f -> f)),
-                                        NamedValue.of("genre", HighlightField.of(f -> f)))),
+                        .query(dsl),
                 Track.class);
+        Map<String, Map<String, String>> snippets = Map.of();
+        if (!response.hits().hits().isEmpty()) {
+            SearchResponse<Track> marked = client.search(s -> s
+                            .index(INDEX)
+                            .size(HIGHLIGHT_LIMIT)
+                            .query(dsl)
+                            .highlight(h -> h
+                                    .preTags("<b>")
+                                    .postTags("</b>")
+                                    .numberOfFragments(0)
+                                    .fields(
+                                            NamedValue.of("title", HighlightField.of(f -> f)),
+                                            NamedValue.of("artist", HighlightField.of(f -> f)),
+                                            NamedValue.of("genre", HighlightField.of(f -> f)),
+                                            NamedValue.of("album", HighlightField.of(f -> f)),
+                                            NamedValue.of("label", HighlightField.of(f -> f)),
+                                            NamedValue.of("comment", HighlightField.of(f -> f)))),
+                    Track.class);
+            snippets = new LinkedHashMap<>();
+            for (Hit<Track> hit : marked.hits().hits()) {
+                String id = hit.id() != null ? hit.id() : hit.source() == null ? null : hit.source().id();
+                if (id != null) {
+                    snippets.put(id, highlightMap(hit.highlight()));
+                }
+            }
+        }
         List<TrackHit> hits = new ArrayList<>();
         for (Hit<Track> hit : response.hits().hits()) {
             if (hit.source() != null) {
-                hits.add(new TrackHit(hit.source(), score(hit), highlightMap(hit.highlight())));
+                String id = hit.id() != null ? hit.id() : hit.source().id();
+                hits.add(new TrackHit(hit.source(), score(hit), snippets.getOrDefault(id, Map.of())));
             }
         }
         return List.copyOf(hits);
@@ -118,7 +139,7 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
                                 .aggregations("genre", m -> m.terms(t -> t.field("genre.raw").size(50))))
                         .aggregations("key", a -> a
                                 .filter(scoped(include, TrackFacets.GENRE))
-                                .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(24))))
+                                .aggregations("key", m -> m.terms(t -> t.field("key.raw").size(50))))
                         .aggregations("drill", a -> a
                                 .filter(scoped(include, TrackFacets.GENRE, TrackFacets.KEY))
                                 .aggregations("bpm", m -> m.range(r -> {
