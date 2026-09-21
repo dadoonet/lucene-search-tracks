@@ -8,14 +8,25 @@ public interface TrackSearch extends AutoCloseable {
 
     void rebuild(List<Track> tracks) throws Exception;
 
-    List<TrackHit> search(
+    TrackSearchSession prepareRequest(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size);
+
+    default List<TrackHit> search(
             String q,
             Map<String, List<String>> filters,
-            Map<String, List<String>> mustNots) throws Exception;
+            Map<String, List<String>> mustNots) throws Exception {
+        TrackSearchSession session = prepareRequest(q, filters, mustNots, 10_000);
+        session.execute();
+        return session.getHits();
+    }
 
-    TrackFacetsResult facets(
+    default TrackFacetsResult facets(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws Exception;
+            throws Exception {
+        TrackSearchSession session = prepareRequest(q, filters, mustNots, 10_000);
+        session.execute();
+        return session.getFacets();
+    }
 
     default TrackFacetsResult facets(String q, Map<String, List<String>> postFilters) throws Exception {
         return facets(q, postFilters == null ? Map.of() : postFilters, Map.of());
@@ -25,9 +36,11 @@ public interface TrackSearch extends AutoCloseable {
      * Engine-native rendering of the search that {@link #search} / {@link #facets} would run.
      * Lucene: {@code Query#toString()}. Elasticsearch: pretty JSON body (query + aggregations).
      */
-    String printQuery(
+    default String printQuery(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws Exception;
+            throws Exception {
+        return prepareRequest(q, filters, mustNots, 10_000).printQuery();
+    }
 
     List<TrackSuggestion> suggest(String prefix) throws Exception;
 

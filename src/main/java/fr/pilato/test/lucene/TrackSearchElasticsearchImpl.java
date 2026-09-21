@@ -35,7 +35,6 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     static final String INDEX = "tracks";
     private static final int SUGGEST_LIMIT = 10;
-    private static final int HIGHLIGHT_LIMIT = 25;
     private static final Pattern HIGHLIGHT = Pattern.compile("<em>(.*?)</em>", Pattern.CASE_INSENSITIVE);
     private static final JacksonJsonpMapper JSONP = new JacksonJsonpMapper();
     private static final ObjectMapper PRETTY = new ObjectMapper()
@@ -88,70 +87,12 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
     }
 
     @Override
-    public List<TrackHit> search(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws IOException {
-        Query dsl = query(q, filters, mustNots);
-        SearchResponse<Track> response = client.search(s -> s
-                        .index(INDEX)
-                        .size(10_000)
-                        .query(dsl),
-                Track.class);
-        Map<String, Map<String, String>> snippets = Map.of();
-        if (!response.hits().hits().isEmpty()) {
-            SearchResponse<Track> marked = client.search(s -> s
-                            .index(INDEX)
-                            .size(HIGHLIGHT_LIMIT)
-                            .query(dsl)
-                            .highlight(h -> h
-                                    .preTags("<b>")
-                                    .postTags("</b>")
-                                    .numberOfFragments(0)
-                                    .fields(
-                                            NamedValue.of("title", HighlightField.of(f -> f)),
-                                            NamedValue.of("artist", HighlightField.of(f -> f)),
-                                            NamedValue.of("genre", HighlightField.of(f -> f)),
-                                            NamedValue.of("album", HighlightField.of(f -> f)),
-                                            NamedValue.of("label", HighlightField.of(f -> f)),
-                                            NamedValue.of("comment", HighlightField.of(f -> f)))),
-                    Track.class);
-            snippets = new LinkedHashMap<>();
-            for (Hit<Track> hit : marked.hits().hits()) {
-                String id = hit.id() != null ? hit.id() : hit.source() == null ? null : hit.source().id();
-                if (id != null) {
-                    snippets.put(id, highlightMap(hit.highlight()));
-                }
-            }
+    public TrackSearchSession prepareRequest(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
+        if (size < 1) {
+            throw new IllegalArgumentException("size must be >= 1");
         }
-        List<TrackHit> hits = new ArrayList<>();
-        for (Hit<Track> hit : response.hits().hits()) {
-            if (hit.source() != null) {
-                String id = hit.id() != null ? hit.id() : hit.source().id();
-                hits.add(new TrackHit(hit.source(), score(hit), snippets.getOrDefault(id, Map.of())));
-            }
-        }
-        return List.copyOf(hits);
-    }
-
-    @Override
-    public TrackFacetsResult facets(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws IOException {
-        SearchResponse<Track> response = client.search(facetRequest(q, filters, mustNots), Track.class);
-        Map<String, Aggregate> aggs = response.aggregations();
-        Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
-        return new TrackFacetsResult(
-                nestedTerms(aggs.get("genre"), "genre"),
-                rangeMap(metrics.get("bpm")),
-                terms(metrics.get("rating")),
-                decades(metrics.get("year")),
-                nestedTerms(aggs.get("key"), "key"));
-    }
-
-    @Override
-    public String printQuery(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
-        return prettyJson(JsonpUtils.toJsonString(facetRequest(q, filters, mustNots), JSONP));
+        return new ElasticsearchSession(q, filters, mustNots, size);
     }
 
     @Override
@@ -199,6 +140,101 @@ public final class TrackSearchElasticsearchImpl implements TrackSearch {
 
     @Override
     public void close() {}
+
+    private final class ElasticsearchSession implements TrackSearchSession {
+        private final String q;
+        private final Map<String, List<String>> filters;
+        private final Map<String, List<String>> mustNots;
+        private final int size;
+        private boolean executed;
+        private int totalHits;
+        private List<TrackHit> hits;
+        private TrackFacetsResult facets;
+
+        private ElasticsearchSession(
+                String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
+            this.q = q;
+            this.filters = filters;
+            this.mustNots = mustNots;
+            this.size = size;
+        }
+
+        @Override
+        public String printQuery() {
+            return prettyJson(JsonpUtils.toJsonString(facetRequest(q, filters, mustNots), JSONP));
+        }
+
+        @Override
+        public void execute() throws Exception {
+            Query dsl = query(q, filters, mustNots);
+            SearchResponse<Track> response = client.search(s -> s
+                            .index(INDEX)
+                            .size(size)
+                            .trackTotalHits(t -> t.enabled(true))
+                            .query(dsl)
+                            .highlight(h -> h
+                                    .preTags("<b>")
+                                    .postTags("</b>")
+                                    .numberOfFragments(0)
+                                    .fields(
+                                            NamedValue.of("title", HighlightField.of(f -> f)),
+                                            NamedValue.of("artist", HighlightField.of(f -> f)),
+                                            NamedValue.of("genre", HighlightField.of(f -> f)),
+                                            NamedValue.of("album", HighlightField.of(f -> f)),
+                                            NamedValue.of("label", HighlightField.of(f -> f)),
+                                            NamedValue.of("comment", HighlightField.of(f -> f)))),
+                    Track.class);
+            List<TrackHit> ordered = new ArrayList<>();
+            for (Hit<Track> hit : response.hits().hits()) {
+                if (hit.source() != null) {
+                    ordered.add(new TrackHit(hit.source(), score(hit), highlightMap(hit.highlight())));
+                }
+            }
+            this.hits = List.copyOf(ordered);
+            this.totalHits = (int) response.hits().total().value();
+
+            SearchResponse<Track> facetResponse = client.search(facetRequest(q, filters, mustNots), Track.class);
+            Map<String, Aggregate> aggs = facetResponse.aggregations();
+            Map<String, Aggregate> metrics = metrics(aggs.get("drill"));
+            this.facets = new TrackFacetsResult(
+                    nestedTerms(aggs.get("genre"), "genre"),
+                    rangeMap(metrics.get("bpm")),
+                    terms(metrics.get("rating")),
+                    decades(metrics.get("year")),
+                    nestedTerms(aggs.get("key"), "key"));
+            this.executed = true;
+        }
+
+        @Override
+        public int totalHits() {
+            requireExecuted();
+            return totalHits;
+        }
+
+        @Override
+        public List<TrackHit> getHits() {
+            requireExecuted();
+            return hits;
+        }
+
+        @Override
+        public TrackFacetsResult getFacets() {
+            requireExecuted();
+            return facets;
+        }
+
+        @Override
+        public String printResponse() {
+            requireExecuted();
+            return "";
+        }
+
+        private void requireExecuted() {
+            if (!executed) {
+                throw new IllegalStateException();
+            }
+        }
+    }
 
     private static SearchRequest facetRequest(
             String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {

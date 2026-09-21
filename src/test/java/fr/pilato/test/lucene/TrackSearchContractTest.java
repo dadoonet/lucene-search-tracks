@@ -6,11 +6,47 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 public abstract class TrackSearchContractTest {
 
     protected abstract TrackSearch index();
+
+    @Test
+    void prepareRequest_rejectsNonPositiveSize() {
+        assertThatThrownBy(() -> index().prepareRequest("Bob", Map.of(), Map.of(), 0))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void session_getHits_beforeExecuteThrows() throws Exception {
+        TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
+        assertThat(session.printQuery()).containsIgnoringCase("bob");
+        assertThatThrownBy(session::getHits).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(session::getFacets).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(session::totalHits).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(session::printResponse).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void session_bobSize25_hasTwentyFiveHitsAndTotal62() throws Exception {
+        TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
+        session.execute();
+        assertThat(session.getHits()).hasSize(25);
+        assertThat(session.totalHits()).isEqualTo(62);
+        assertThat(count(session.getFacets().genres(), "Club")).isEqualTo(26);
+        assertThat(session.getFacets().bpm().get("120 – 130")).isEqualTo(52L);
+    }
+
+    @Test
+    void session_executeTwice_replacesResults() throws Exception {
+        TrackSearchSession session = index().prepareRequest("Bob", Map.of(), Map.of(), 25);
+        session.execute();
+        session.execute();
+        assertThat(session.getHits()).hasSize(25);
+        assertThat(session.totalHits()).isEqualTo(62);
+    }
 
     @Test
     void search_hitHasEmptyHighlightsByDefault() throws Exception {

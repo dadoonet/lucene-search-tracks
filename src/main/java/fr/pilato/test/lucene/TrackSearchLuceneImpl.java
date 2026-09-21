@@ -83,7 +83,6 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     private static final float LABEL_BOOST = 1.0f;
     private static final float COMMENT_BOOST = 0.5f;
     private static final float PREFIX_BOOST = 0.25f;
-    private static final int HIGHLIGHT_LIMIT = 25;
     private static final String[] HIGHLIGHT_FIELDS = {
             "title", "artist", "genre", "album", "label", "comment"};
     private static final FacetsConfig FACETS = new FacetsConfig();
@@ -125,40 +124,12 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
     }
 
     @Override
-    public List<TrackHit> search(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws IOException {
-        Query lucene = query(q, filters, mustNots);
-        IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
-        try (IndexReader reader = searcher.getIndexReader()) {
-            int limit = Math.max(1, reader.numDocs());
-            TopDocs hits = searcher.search(lucene, limit);
-            List<Map<String, String>> highlighted = highlight(searcher, lucene, firstHits(hits, HIGHLIGHT_LIMIT));
-            List<TrackHit> ordered = new ArrayList<>();
-            for (int i = 0; i < hits.scoreDocs.length; i++) {
-                ScoreDoc hit = hits.scoreDocs[i];
-                IndexableField id = searcher.storedFields().document(hit.doc).getField("id");
-                if (id == null) {
-                    continue;
-                }
-                Track track = tracks.get(id.stringValue());
-                if (track != null) {
-                    Map<String, String> snippets =
-                            i < highlighted.size() ? highlighted.get(i) : Map.of();
-                    ordered.add(new TrackHit(track, hit.score, snippets));
-                }
-            }
-            return List.copyOf(ordered);
+    public TrackSearchSession prepareRequest(
+            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
+        if (size < 1) {
+            throw new IllegalArgumentException("size must be >= 1");
         }
-    }
-
-    private static TopDocs firstHits(TopDocs hits, int n) {
-        if (hits.scoreDocs.length <= n) {
-            return hits;
-        }
-        ScoreDoc[] page = new ScoreDoc[n];
-        System.arraycopy(hits.scoreDocs, 0, page, 0, n);
-        return new TopDocs(hits.totalHits, page);
+        return new LuceneSession(q, filters, mustNots, size);
     }
 
     private static List<Map<String, String>> highlight(
@@ -185,53 +156,6 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
                 hits.add(Map.copyOf(fields));
             }
             return List.copyOf(hits);
-        }
-    }
-
-    @Override
-    public TrackFacetsResult facets(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots)
-            throws IOException {
-        IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
-        try (IndexReader reader = searcher.getIndexReader()) {
-            var state = new DefaultSortedSetDocValuesReaderState(reader, FACETS);
-            Map<String, List<String>> drill = new LinkedHashMap<>();
-            Map<String, List<String>> baseFilters = new LinkedHashMap<>();
-            if (filters != null) {
-                for (Map.Entry<String, List<String>> entry : filters.entrySet()) {
-                    if (TrackFacets.GENRE.equals(entry.getKey()) || TrackFacets.KEY.equals(entry.getKey())) {
-                        if (entry.getValue() != null && !entry.getValue().isEmpty()) {
-                            drill.put(entry.getKey(), entry.getValue());
-                        }
-                    } else {
-                        baseFilters.put(entry.getKey(), entry.getValue());
-                    }
-                }
-            }
-            Query base = query(q, baseFilters, mustNots == null ? Map.of() : mustNots);
-            Facets luceneFacets;
-            if (drill.isEmpty()) {
-                FacetsCollector fc = FacetsCollectorManager.search(
-                                searcher, base, 1, new FacetsCollectorManager())
-                        .facetsCollector();
-                luceneFacets = mix(state, fc);
-            } else {
-                DrillDownQuery drillDown = new DrillDownQuery(FACETS, base);
-                drill.forEach((dim, values) ->
-                        drillDown.add(dim, query("", Map.of(dim, values), Map.of())));
-                luceneFacets = new TrackDrillSideways(searcher, state).search(drillDown, 1).facets;
-            }
-            FacetResult genres = luceneFacets.getAllChildren(TrackFacets.GENRE);
-            FacetResult bpm = luceneFacets.getAllChildren("bpm");
-            FacetResult rating = luceneFacets.getAllChildren("rating");
-            FacetResult year = luceneFacets.getAllChildren("year");
-            FacetResult keys = luceneFacets.getAllChildren(TrackFacets.KEY);
-            return new TrackFacetsResult(
-                    toMap(genres),
-                    toMap(bpm),
-                    toMap(rating),
-                    decades(year),
-                    toMap(keys));
         }
     }
 
@@ -280,12 +204,6 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
             }
             return List.copyOf(result);
         }
-    }
-
-    @Override
-    public String printQuery(
-            String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots) {
-        return query(q, filters, mustNots).toString();
     }
 
     @Override
@@ -588,6 +506,127 @@ public final class TrackSearchLuceneImpl implements TrackSearch {
 
     private static String suggestionKey(String field, String text) {
         return field + "\0" + text;
+    }
+
+    private final class LuceneSession implements TrackSearchSession {
+        private final String q;
+        private final Map<String, List<String>> filters;
+        private final Map<String, List<String>> mustNots;
+        private final int size;
+        private boolean executed;
+        private int totalHits;
+        private List<TrackHit> hits;
+        private TrackFacetsResult facets;
+
+        private LuceneSession(
+                String q, Map<String, List<String>> filters, Map<String, List<String>> mustNots, int size) {
+            this.q = q;
+            this.filters = filters;
+            this.mustNots = mustNots;
+            this.size = size;
+        }
+
+        @Override
+        public String printQuery() {
+            return query(q, filters, mustNots).toString();
+        }
+
+        @Override
+        public void execute() throws Exception {
+            IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer));
+            try (IndexReader reader = searcher.getIndexReader()) {
+                var state = new DefaultSortedSetDocValuesReaderState(reader, FACETS);
+                Map<String, List<String>> drill = new LinkedHashMap<>();
+                Map<String, List<String>> baseFilters = new LinkedHashMap<>();
+                if (filters != null) {
+                    for (Map.Entry<String, List<String>> entry : filters.entrySet()) {
+                        if (TrackFacets.GENRE.equals(entry.getKey()) || TrackFacets.KEY.equals(entry.getKey())) {
+                            if (entry.getValue() != null && !entry.getValue().isEmpty()) {
+                                drill.put(entry.getKey(), entry.getValue());
+                            }
+                        } else {
+                            baseFilters.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                }
+                Query base = query(q, baseFilters, mustNots == null ? Map.of() : mustNots);
+                TopDocs topDocs;
+                Facets luceneFacets;
+                if (drill.isEmpty()) {
+                    FacetsCollectorManager.FacetsResult collected = FacetsCollectorManager.search(
+                            searcher, query(q, filters, mustNots), size, new FacetsCollectorManager());
+                    topDocs = collected.topDocs();
+                    luceneFacets = mix(state, collected.facetsCollector());
+                } else {
+                    DrillDownQuery drillDown = new DrillDownQuery(FACETS, base);
+                    drill.forEach((dim, values) ->
+                            drillDown.add(dim, query("", Map.of(dim, values), Map.of())));
+                    var result = new TrackDrillSideways(searcher, state).search(drillDown, size);
+                    topDocs = result.hits;
+                    luceneFacets = result.facets;
+                }
+                List<Map<String, String>> highlighted =
+                        highlight(searcher, query(q, filters, mustNots), topDocs);
+                List<TrackHit> ordered = new ArrayList<>();
+                for (int i = 0; i < topDocs.scoreDocs.length; i++) {
+                    ScoreDoc hit = topDocs.scoreDocs[i];
+                    IndexableField id = searcher.storedFields().document(hit.doc).getField("id");
+                    if (id == null) {
+                        continue;
+                    }
+                    Track track = tracks.get(id.stringValue());
+                    if (track != null) {
+                        Map<String, String> snippets =
+                                i < highlighted.size() ? highlighted.get(i) : Map.of();
+                        ordered.add(new TrackHit(track, hit.score, snippets));
+                    }
+                }
+                this.hits = List.copyOf(ordered);
+                this.totalHits = Math.toIntExact(topDocs.totalHits.value());
+                FacetResult genres = luceneFacets.getAllChildren(TrackFacets.GENRE);
+                FacetResult bpm = luceneFacets.getAllChildren("bpm");
+                FacetResult rating = luceneFacets.getAllChildren("rating");
+                FacetResult year = luceneFacets.getAllChildren("year");
+                FacetResult keys = luceneFacets.getAllChildren(TrackFacets.KEY);
+                this.facets = new TrackFacetsResult(
+                        toMap(genres),
+                        toMap(bpm),
+                        toMap(rating),
+                        decades(year),
+                        toMap(keys));
+                this.executed = true;
+            }
+        }
+
+        @Override
+        public int totalHits() {
+            requireExecuted();
+            return totalHits;
+        }
+
+        @Override
+        public List<TrackHit> getHits() {
+            requireExecuted();
+            return hits;
+        }
+
+        @Override
+        public TrackFacetsResult getFacets() {
+            requireExecuted();
+            return facets;
+        }
+
+        @Override
+        public String printResponse() {
+            requireExecuted();
+            return "";
+        }
+
+        private void requireExecuted() {
+            if (!executed) {
+                throw new IllegalStateException();
+            }
+        }
     }
 
     private static final class TrackDrillSideways extends DrillSideways {
