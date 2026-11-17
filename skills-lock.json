@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "clever-tools": {
+      "source": "CleverCloud/clever-tools",
+      "commit": "21350022442e82c15c5f2a8da1210f34357e2eb1",
+      "sourceType": "github",
+      "skillPath": "skills/clever-tools/SKILL.md",
+      "computedHash": "cbb91620dec908ccebada67dc48017b8b40ef1fba1ae244d2091f861167b26e8"
+    }
+  }
+}
