@@ -21,13 +21,20 @@ import static fr.pilato.test.lucene.playground.PlaygroundModels.SuggestRequest;
 
 public final class PlaygroundApp {
 
-    public static final int PORT = 7171;
+    public static final int DEFAULT_PORT = 7171;
+
+    /** Listens on {@code PORT} when set (Clever Cloud injects it), otherwise on {@link #DEFAULT_PORT}. */
+    static int port() {
+        String env = System.getenv("PORT");
+        return env == null || env.isBlank() ? DEFAULT_PORT : Integer.parseInt(env.trim());
+    }
 
     private PlaygroundApp() {}
 
     static void main() throws Exception {
         PlaygroundService service = PlaygroundService.boot();
-        Javalin app = create(service).start(PORT);
+        int port = port();
+        Javalin app = create(service).start(port);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             // Maven wraps System.out with Jansi; concurrent ANSI writes during stop can throw
             // NumberFormatException ("0m"). Skip Javalin logs and always close the service.
@@ -44,7 +51,7 @@ public final class PlaygroundApp {
                 }
             }
         }));
-        System.out.println("Lucene playground → http://localhost:" + PORT);
+        System.out.println("Lucene playground → http://localhost:" + port);
     }
 
     public static Javalin create(PlaygroundService service) {
